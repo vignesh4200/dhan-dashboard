@@ -12,12 +12,19 @@ export async function POST(req: NextRequest) {
   const sessionCookie = await firebaseAdminAuth.createSessionCookie(idToken, { expiresIn: fiveDays });
 
   // Upsert the user row so dhan_credentials / snapshots have somewhere to attach.
-  await supabaseAdmin
+  const { error: upsertError } = await supabaseAdmin
     .from("users")
     .upsert(
       { firebase_uid: decoded.uid, phone: phone || decoded.phone_number },
       { onConflict: "firebase_uid" }
     );
+
+  if (upsertError) {
+    return NextResponse.json(
+      { error: "Failed to save user record: " + upsertError.message },
+      { status: 500 }
+    );
+  }
 
   const res = NextResponse.json({ ok: true });
   res.cookies.set("session", sessionCookie, {
