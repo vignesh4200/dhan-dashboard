@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import { decryptSecret } from "@/lib/crypto";
-import { getDhanHoldings, getLtpForHoldings } from "@/lib/dhan";
+import { getDhanHoldings, getLtpFromYahoo } from "@/lib/dhan";
 import { computeHolding, tierFor, alertMessage } from "@/lib/alerts";
 import { sendWhatsAppAlert, isWhatsAppConfigured } from "@/lib/whatsapp";
 
@@ -29,19 +29,16 @@ export async function GET(req: NextRequest) {
       const rawHoldings = await getDhanHoldings(creds.dhan_client_id, accessToken);
       if (rawHoldings.length === 0) continue;
 
-      const ltpMap = await getLtpForHoldings(creds.dhan_client_id, accessToken, rawHoldings);
+      const ltpMap = await getLtpFromYahoo(rawHoldings);
 
       const computed = rawHoldings.map((h) =>
-        computeHolding(h.tradingSymbol, h.totalQty, h.avgCostPrice, ltpMap[h.securityId] ?? h.avgCostPrice)
+        computeHolding(h.tradingSymbol, h.totalQty, h.avgCostPrice, ltpMap[h.tradingSymbol] ?? h.avgCostPrice)
       );
 
       const totalInvested = computed.reduce((s, h) => s + h.invested, 0);
       const totalCurrent = computed.reduce((s, h) => s + h.current, 0);
       const totalPnl = totalCurrent - totalInvested;
 
-      // Compare against the previous snapshot to get day P&L (approximation:
-      // change since the last stored snapshot, refined by seeding a proper
-      // "previous close" value if you want exact day P&L instead).
       const { data: prevSnap } = await supabaseAdmin
         .from("portfolio_snapshots")
         .select("total_current")
@@ -60,9 +57,6 @@ export async function GET(req: NextRequest) {
         day_pnl: dayPnl,
       });
 
-      // Profit-booking alerts — only attempted if WhatsApp is configured.
-      // Until then, the dashboard still shows these alerts, they just aren't
-      // pushed to your phone.
       const whatsappReady = isWhatsAppConfigured();
       const toNumber = user.whatsapp_number || user.phone;
       let alertsSent = 0;
@@ -80,7 +74,7 @@ export async function GET(req: NextRequest) {
             .eq("tier", tier)
             .eq("alert_date", new Date().toISOString().slice(0, 10))
             .maybeSingle();
-          if (already) continue; // already alerted today for this stock/tier
+          if (already) continue;
 
           await sendWhatsAppAlert({
             toPhoneE164: toNumber,

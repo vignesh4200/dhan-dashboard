@@ -23,25 +23,6 @@ export async function validateDhanToken(clientId: string, accessToken: string) {
   return res.ok;
 }
 
-// Dhan's personal access tokens (from the "Access Token" tab in Profile, no
-// redirect URL) are short-lived — roughly 24 hours — but can be extended by
-// another 24 hours via this endpoint, as long as it's called BEFORE the token
-// fully expires. Call this at least once a day, every day (weekends included),
-// and the token effectively never expires without you touching anything.
-// Docs: https://dhanhq.co/docs/v2/authentication/
-export async function renewDhanToken(
-  clientId: string,
-  accessToken: string
-): Promise<{ accessToken: string } | null> {
-  const res = await fetch(`${BASE_URL}/RenewToken`, {
-    method: "PUT",
-    headers: { "access-token": accessToken, "dhanClientId": clientId },
-  });
-  if (!res.ok) return null; // token already expired, or renewal failed — needs manual regeneration
-  const data = await res.json();
-  return { accessToken: data.accessToken };
-}
-
 export async function getDhanHoldings(
   clientId: string,
   accessToken: string
@@ -60,50 +41,37 @@ export async function getDhanHoldings(
 }
 
 // --- Live price (LTP) lookup ---
-// The holdings endpoint returns quantity and average cost, but NOT the current
-// market price. Dhan's Market Quote API supplies that (ticker/quote/full modes).
-//
-// IMPORTANT: verify the exact request shape against the current docs before relying
-// on this in production — Dhan's market-quote payload format has changed across
-// versions and wasn't fully confirmed at build time:
-// https://dhanhq.co/docs/v2/market-quote/
-//
-// Below is a best-effort implementation using the documented pattern (POST a list
-// of exchange-segment/security-id pairs, get back LTP per instrument). Test it with
-// one holding first and adjust field names if Dhan's response differs.
-export async function getLtpForHoldings(
-  clientId: string,
-  accessToken: string,
+// Dhan's own live-price API requires a paid "Data API" subscription (₹499+/month).
+// This uses Yahoo Finance's public quote endpoint instead — free, no key needed.
+// It's an unofficial/undocumented endpoint, so it could change or get rate-limited
+// without notice, but it's reliable enough for a personal 15-minute refresh of a
+// handful of holdings. Prices may lag your broker's tick by a few seconds and won't
+// always match Dhan's feed to the paisa.
+export async function getLtpFromYahoo(
   holdings: DhanHolding[]
 ): Promise<Record<string, number>> {
-  const body: Record<string, string[]> = {};
-  for (const h of holdings) {
-    const segment = h.exchange === "BSE" ? "BSE_EQ" : "NSE_EQ";
-    body[segment] = body[segment] || [];
-    body[segment].push(h.securityId);
-  }
-
-  const res = await fetch(`${BASE_URL}/marketfeed/ltp`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "access-token": accessToken,
-      "client-id": clientId,
-    },
-    body: JSON.stringify(body),
-  });
-  if (!res.ok) {
-    throw new Error(`Dhan LTP request failed: ${res.status} ${await res.text()}`);
-  }
-  const data = await res.json();
-
-  // Map back to { securityId: ltp }. Adjust this parsing to match the actual
-  // response shape you see when you test it — see the doc link above.
   const out: Record<string, number> = {};
-  for (const segment of Object.keys(data?.data || {})) {
-    for (const secId of Object.keys(data.data[segment] || {})) {
-      out[secId] = data.data[segment][secId]?.last_price ?? data.data[segment][secId]?.ltp;
-    }
-  }
+
+  await Promise.all(
+    holdings.map(async (h) => {
+      const suffix = h.exchange === "BSE" ? ".BO" : ".NS";
+      const yahooSymbol = `${h.tradingSymbol}${suffix}`;
+      try {
+        const res = await fetch(
+          `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(yahooSymbol)}?interval=1d&range=1d`,
+          { headers: { "User-Agent": "Mozilla/5.0" } }
+        );
+        if (!res.ok) return;
+        const data = await res.json();
+        const price = data?.chart?.result?.[0]?.meta?.regularMarketPrice;
+        if (typeof price === "number") {
+          out[h.tradingSymbol] = price;
+        }
+      } catch {
+        // Skip this one — the caller falls back to avg cost price if a symbol is missing.
+      }
+    })
+  );
+
   return out;
 }
