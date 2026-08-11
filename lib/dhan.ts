@@ -40,6 +40,25 @@ export async function getDhanHoldings(
   return res.json();
 }
 
+// Dhan's personal access tokens (from the "Access Token" tab in Profile, no
+// redirect URL) are short-lived — roughly 24 hours — but can be extended by
+// another 24 hours via this endpoint, as long as it's called BEFORE the token
+// fully expires. Call this at least once a day, every day (weekends included),
+// and the token effectively never expires without you touching anything.
+// Docs: https://dhanhq.co/docs/v2/authentication/
+export async function renewDhanToken(
+  clientId: string,
+  accessToken: string
+): Promise<{ accessToken: string } | null> {
+  const res = await fetch(`${BASE_URL}/RenewToken`, {
+    method: "PUT",
+    headers: { "access-token": accessToken, "dhanClientId": clientId },
+  });
+  if (!res.ok) return null;
+  const data = await res.json();
+  return { accessToken: data.accessToken };
+}
+
 // --- Live price (LTP) lookup ---
 // Dhan's own live-price API requires a paid "Data API" subscription (₹499+/month).
 // This uses Yahoo Finance's public quote endpoint instead — free, no key needed.
