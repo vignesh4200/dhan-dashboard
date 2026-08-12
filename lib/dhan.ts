@@ -16,28 +16,54 @@ export type DhanHolding = {
   avgCostPrice: number;
 };
 
+export type DhanOrder = {
+  orderId: string;
+  transactionType: string;
+  tradingSymbol: string;
+  quantity: number;
+  price: number;
+  orderStatus: string;
+  createTime: string;
+};
+
+export async function getDhanOrders(clientId: string, accessToken: string): Promise<DhanOrder[]> {
+  const res = await fetch(`${BASE_URL}/orders`, {
+    headers: { "access-token": accessToken, "client-id": clientId },
+  });
+  if (!res.ok) {
+    throw new Error(`Dhan orders request failed: ${res.status} ${await res.text()}`);
+  }
+  return res.json();
+}
+
+export type DhanTrade = {
+  orderId: string;
+  transactionType: string;
+  tradingSymbol: string;
+  tradedQuantity: number;
+  tradedPrice: number;
+  exchangeTradeTime: string;
+};
+
+// Today's executed trades. Dhan's v2 trade-history-by-date-range endpoint
+// wasn't fully confirmed at build time — this uses the documented "trade book"
+// endpoint, which covers same-day trades. Verify against
+// https://dhanhq.co/docs/v2/orders/ if you need a longer history window.
+export async function getDhanTrades(clientId: string, accessToken: string): Promise<DhanTrade[]> {
+  const res = await fetch(`${BASE_URL}/trades`, {
+    headers: { "access-token": accessToken, "client-id": clientId },
+  });
+  if (!res.ok) {
+    throw new Error(`Dhan trades request failed: ${res.status} ${await res.text()}`);
+  }
+  return res.json();
+}
+
 export async function validateDhanToken(clientId: string, accessToken: string) {
   const res = await fetch(`${BASE_URL}/profile`, {
     headers: { "access-token": accessToken, "client-id": clientId },
   });
   return res.ok;
-}
-
-export async function getDhanHoldings(
-  clientId: string,
-  accessToken: string
-): Promise<DhanHolding[]> {
-  const res = await fetch(`${BASE_URL}/holdings`, {
-    headers: {
-      "Content-Type": "application/json",
-      "access-token": accessToken,
-      "client-id": clientId,
-    },
-  });
-  if (!res.ok) {
-    throw new Error(`Dhan holdings request failed: ${res.status} ${await res.text()}`);
-  }
-  return res.json();
 }
 
 // Dhan's personal access tokens (from the "Access Token" tab in Profile, no
@@ -59,13 +85,26 @@ export async function renewDhanToken(
   return { accessToken: data.accessToken };
 }
 
+export async function getDhanHoldings(
+  clientId: string,
+  accessToken: string
+): Promise<DhanHolding[]> {
+  const res = await fetch(`${BASE_URL}/holdings`, {
+    headers: {
+      "Content-Type": "application/json",
+      "access-token": accessToken,
+      "client-id": clientId,
+    },
+  });
+  if (!res.ok) {
+    throw new Error(`Dhan holdings request failed: ${res.status} ${await res.text()}`);
+  }
+  return res.json();
+}
+
 // --- Live price (LTP) lookup ---
 // Dhan's own live-price API requires a paid "Data API" subscription (₹499+/month).
 // This uses Yahoo Finance's public quote endpoint instead — free, no key needed.
-// It's an unofficial/undocumented endpoint, so it could change or get rate-limited
-// without notice, but it's reliable enough for a personal 15-minute refresh of a
-// handful of holdings. Prices may lag your broker's tick by a few seconds and won't
-// always match Dhan's feed to the paisa.
 export async function getLtpFromYahoo(
   holdings: DhanHolding[]
 ): Promise<Record<string, number>> {
@@ -86,9 +125,7 @@ export async function getLtpFromYahoo(
         if (typeof price === "number") {
           out[h.tradingSymbol] = price;
         }
-      } catch {
-        // Skip this one — the caller falls back to avg cost price if a symbol is missing.
-      }
+      } catch {}
     })
   );
 
