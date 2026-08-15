@@ -27,14 +27,12 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Client ID, PIN, and TOTP secret are all required" }, { status: 400 });
   }
 
-  // Validate by actually generating a live token right now — proves the
-  // Client ID, PIN, and TOTP secret are all correct together.
   const code = generateTotpCode(totpSecret);
-  const result = await generateAccessTokenViaTotp(dhanClientId, dhanPin, code).catch(() => null);
+  const result = await generateAccessTokenViaTotp(dhanClientId, dhanPin, code);
 
-  if (!result) {
+  if ("error" in result) {
     return NextResponse.json(
-      { error: "Dhan rejected these credentials. Double-check your Client ID, PIN, and that TOTP is enabled with this exact secret." },
+      { error: "Dhan rejected these credentials: " + result.error },
       { status: 400 }
     );
   }
