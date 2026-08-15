@@ -4,7 +4,8 @@ import { useEffect, useState } from "react";
 export default function SettingsPage() {
   const [configured, setConfigured] = useState<boolean | null>(null);
   const [clientId, setClientId] = useState("");
-  const [accessToken, setAccessToken] = useState("");
+  const [pin, setPin] = useState("");
+  const [totpSecret, setTotpSecret] = useState("");
   const [whatsappNumber, setWhatsappNumber] = useState("");
   const [status, setStatus] = useState("");
   const [busy, setBusy] = useState(false);
@@ -22,13 +23,14 @@ export default function SettingsPage() {
       const res = await fetch("/api/settings/credentials", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ dhanClientId: clientId, dhanAccessToken: accessToken, whatsappNumber }),
+        body: JSON.stringify({ dhanClientId: clientId, dhanPin: pin, totpSecret, whatsappNumber }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Save failed");
-      setStatus("Saved. Your dashboard will refresh with the new token within 15 minutes.");
+      setStatus("Saved and verified — your token will now stay fresh automatically, no more manual updates.");
       setConfigured(true);
-      setAccessToken("");
+      setPin("");
+      setTotpSecret("");
     } catch (e: any) {
       setStatus(e.message);
     } finally {
@@ -42,7 +44,7 @@ export default function SettingsPage() {
 
       {configured !== null && (
         <span className={`settings-status ${configured ? "ok" : "missing"}`}>
-          {configured ? "Dhan credentials connected" : "No Dhan credentials saved yet"}
+          {configured ? "Dhan TOTP authentication connected" : "No Dhan credentials saved yet"}
         </span>
       )}
 
@@ -55,17 +57,28 @@ export default function SettingsPage() {
           placeholder="1000000009"
         />
 
-        <label className="field-label">Dhan Access Token</label>
+        <label className="field-label">Dhan PIN</label>
         <input
           className="field-input"
           type="password"
-          value={accessToken}
-          onChange={(e) => setAccessToken(e.target.value)}
-          placeholder="Paste your current JWT access token"
+          value={pin}
+          onChange={(e) => setPin(e.target.value)}
+          placeholder="Your Dhan trading PIN"
+        />
+
+        <label className="field-label">TOTP Secret</label>
+        <input
+          className="field-input"
+          type="password"
+          value={totpSecret}
+          onChange={(e) => setTotpSecret(e.target.value)}
+          placeholder="Paste the secret key shown when setting up TOTP"
         />
         <div style={{ fontSize: 11.5, color: "var(--text-muted)", marginTop: -8, marginBottom: 14 }}>
-          Generate this from Dhan Web → Profile → DhanHQ Trading APIs. Tokens can expire —
-          come back here to update it whenever Dhan asks you to regenerate one.
+          From Dhan Web → Profile → DhanHQ Trading APIs → Set up TOTP. When it shows you a QR code,
+          look for a "can't scan? enter this key manually" option — that text string is what goes here.
+          Once saved, your dashboard mints a fresh access token automatically every 15 minutes — you
+          never need to touch this again unless you change your Dhan PIN or reset TOTP.
         </div>
 
         <label className="field-label">WhatsApp number for alerts</label>
@@ -76,8 +89,8 @@ export default function SettingsPage() {
           placeholder="+919876543210"
         />
 
-        <button className="btn" disabled={busy || !clientId || !accessToken} onClick={save}>
-          {busy ? "Saving…" : "Save credentials"}
+        <button className="btn" disabled={busy || !clientId || !pin || !totpSecret} onClick={save}>
+          {busy ? "Verifying…" : "Save & verify credentials"}
         </button>
 
         {status && <div style={{ marginTop: 12, fontSize: 12.5, color: "var(--text-muted)" }}>{status}</div>}
