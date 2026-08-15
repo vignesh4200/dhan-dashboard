@@ -1,13 +1,19 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
-import { decryptSecret } from "@/lib/crypto";
-import { getDhanHoldings, getLtpFromYahoo } from "@/lib/dhan";
+import { decryptSecret, encryptSecret } from "@/lib/crypto";
+import { getDhanHoldings, getLtpFromYahoo, generateAccessTokenViaTotp } from "@/lib/dhan";
+import { generateTotpCode } from "@/lib/totp";
 import { computeHolding, tierFor, alertMessage } from "@/lib/alerts";
 import { sendWhatsAppAlert, isWhatsAppConfigured } from "@/lib/whatsapp";
 
 // Called every 15 minutes by an external cron pinger (e.g. cron-job.org) hitting:
 //   GET https://your-app.vercel.app/api/cron/refresh?secret=YOUR_CRON_SECRET
-// during market hours. Protect it with CRON_SECRET so nobody else can trigger it.
+//
+// Mints a completely FRESH Dhan access token on every single run using
+// Client ID + PIN + a live TOTP code — so the token is always brand new and
+// never has a chance to expire. This also caches that fresh token in the
+// database so on-demand routes (orders, trades) can reuse it without each
+// one separately hitting Dhan's TOTP endpoint.
 export async function GET(req: NextRequest) {
   const secret = req.nextUrl.searchParams.get("secret");
   if (secret !== process.env.CRON_SECRET) {
@@ -16,16 +22,31 @@ export async function GET(req: NextRequest) {
 
   const { data: users } = await supabaseAdmin
     .from("users")
-    .select("id, phone, whatsapp_number, dhan_credentials(dhan_client_id, access_token_encrypted)");
+    .select("id, phone, whatsapp_number, dhan_credentials(dhan_client_id, dhan_pin_encrypted, totp_secret_encrypted)");
 
   const results: any[] = [];
 
   for (const user of users || []) {
     const creds = (user as any).dhan_credentials;
-    if (!creds) continue;
+    if (!creds || !creds.dhan_pin_encrypted || !creds.totp_secret_encrypted) continue;
 
     try {
-      const accessToken = decryptSecret(creds.access_token_encrypted);
+      const pin = decryptSecret(creds.dhan_pin_encrypted);
+      const totpSecret = decryptSecret(creds.totp_secret_encrypted);
+      const code = generateTotpCode(totpSecret);
+      const minted = await generateAccessTokenViaTotp(creds.dhan_client_id, pin, code);
+
+      if (!minted) {
+        results.push({ user: user.id, ok: false, reason: "TOTP token generation failed — check PIN/TOTP secret in Settings" });
+        continue;
+      }
+      const accessToken = minted.accessToken;
+
+      await supabaseAdmin
+        .from("dhan_credentials")
+        .update({ access_token_encrypted: encryptSecret(accessToken), updated_at: new Date().toISOString() })
+        .eq("user_id", user.id);
+
       const rawHoldings = await getDhanHoldings(creds.dhan_client_id, accessToken);
       if (rawHoldings.length === 0) continue;
 
