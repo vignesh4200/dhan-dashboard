@@ -6,14 +6,6 @@ import { generateTotpCode } from "@/lib/totp";
 import { computeHolding, tierFor, alertMessage } from "@/lib/alerts";
 import { sendWhatsAppAlert, isWhatsAppConfigured } from "@/lib/whatsapp";
 
-// Called every 15 minutes by an external cron pinger (e.g. cron-job.org) hitting:
-//   GET https://your-app.vercel.app/api/cron/refresh?secret=YOUR_CRON_SECRET
-//
-// Mints a completely FRESH Dhan access token on every single run using
-// Client ID + PIN + a live TOTP code — so the token is always brand new and
-// never has a chance to expire. This also caches that fresh token in the
-// database so on-demand routes (orders, trades) can reuse it without each
-// one separately hitting Dhan's TOTP endpoint.
 export async function GET(req: NextRequest) {
   const secret = req.nextUrl.searchParams.get("secret");
   if (secret !== process.env.CRON_SECRET) {
@@ -36,8 +28,8 @@ export async function GET(req: NextRequest) {
       const code = generateTotpCode(totpSecret);
       const minted = await generateAccessTokenViaTotp(creds.dhan_client_id, pin, code);
 
-      if (!minted) {
-        results.push({ user: user.id, ok: false, reason: "TOTP token generation failed — check PIN/TOTP secret in Settings" });
+      if ("error" in minted) {
+        results.push({ user: user.id, ok: false, reason: "TOTP token generation failed: " + minted.error });
         continue;
       }
       const accessToken = minted.accessToken;
