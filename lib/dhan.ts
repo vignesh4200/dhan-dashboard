@@ -45,10 +45,6 @@ export type DhanTrade = {
   exchangeTradeTime: string;
 };
 
-// Today's executed trades. Dhan's v2 trade-history-by-date-range endpoint
-// wasn't fully confirmed at build time — this uses the documented "trade book"
-// endpoint, which covers same-day trades. Verify against
-// https://dhanhq.co/docs/v2/orders/ if you need a longer history window.
 export async function getDhanTrades(clientId: string, accessToken: string): Promise<DhanTrade[]> {
   const res = await fetch(`${BASE_URL}/trades`, {
     headers: { "access-token": accessToken, "client-id": clientId },
@@ -60,19 +56,23 @@ export async function getDhanTrades(clientId: string, accessToken: string): Prom
 }
 
 // Generates a fresh access token on demand using Client ID + PIN + a live
-// TOTP code — no manual "generate token" click needed, and no 24h clock to
-// race against, since we can just mint a new one whenever we need it.
-// Docs: https://dhanhq.co/docs/v2/authentication/
+// TOTP code. Returns Dhan's actual error text on failure instead of hiding it,
+// so we can see exactly what's wrong (wrong PIN, bad TOTP, etc).
 export async function generateAccessTokenViaTotp(
   clientId: string,
   pin: string,
   totpCode: string
-): Promise<{ accessToken: string } | null> {
+): Promise<{ accessToken: string } | { error: string }> {
   const url = `https://auth.dhan.co/app/generateAccessToken?dhanClientId=${encodeURIComponent(clientId)}&pin=${encodeURIComponent(pin)}&totp=${encodeURIComponent(totpCode)}`;
   const res = await fetch(url, { method: "POST" });
-  if (!res.ok) return null;
-  const data = await res.json();
-  return data.accessToken ? { accessToken: data.accessToken } : null;
+  const bodyText = await res.text();
+  if (!res.ok) return { error: `${res.status} ${bodyText}` };
+  try {
+    const data = JSON.parse(bodyText);
+    return data.accessToken ? { accessToken: data.accessToken } : { error: `No accessToken in response: ${bodyText}` };
+  } catch {
+    return { error: `Non-JSON response: ${bodyText}` };
+  }
 }
 
 export async function validateDhanToken(clientId: string, accessToken: string) {
@@ -80,25 +80,6 @@ export async function validateDhanToken(clientId: string, accessToken: string) {
     headers: { "access-token": accessToken, "client-id": clientId },
   });
   return res.ok;
-}
-
-// Dhan's personal access tokens (from the "Access Token" tab in Profile, no
-// redirect URL) are short-lived — roughly 24 hours — but can be extended by
-// another 24 hours via this endpoint, as long as it's called BEFORE the token
-// fully expires. Kept as a fallback — with TOTP now in place this generally
-// won't be needed, since the refresh cron mints a brand-new token every run.
-export async function renewDhanToken(
-  clientId: string,
-  accessToken: string
-): Promise<{ accessToken: string | null; raw: any } | null> {
-  const res = await fetch(`${BASE_URL}/RenewToken`, {
-    method: "PUT",
-    headers: { "access-token": accessToken, "dhanClientId": clientId },
-  });
-  if (!res.ok) return null;
-  const data = await res.json();
-  const newToken = data.accessToken || data.access_token || data.token || null;
-  return { accessToken: newToken, raw: data };
 }
 
 export async function getDhanHoldings(
