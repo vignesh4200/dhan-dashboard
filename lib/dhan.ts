@@ -59,6 +59,22 @@ export async function getDhanTrades(clientId: string, accessToken: string): Prom
   return res.json();
 }
 
+// Generates a fresh access token on demand using Client ID + PIN + a live
+// TOTP code — no manual "generate token" click needed, and no 24h clock to
+// race against, since we can just mint a new one whenever we need it.
+// Docs: https://dhanhq.co/docs/v2/authentication/
+export async function generateAccessTokenViaTotp(
+  clientId: string,
+  pin: string,
+  totpCode: string
+): Promise<{ accessToken: string } | null> {
+  const url = `https://auth.dhan.co/app/generateAccessToken?dhanClientId=${encodeURIComponent(clientId)}&pin=${encodeURIComponent(pin)}&totp=${encodeURIComponent(totpCode)}`;
+  const res = await fetch(url, { method: "POST" });
+  if (!res.ok) return null;
+  const data = await res.json();
+  return data.accessToken ? { accessToken: data.accessToken } : null;
+}
+
 export async function validateDhanToken(clientId: string, accessToken: string) {
   const res = await fetch(`${BASE_URL}/profile`, {
     headers: { "access-token": accessToken, "client-id": clientId },
@@ -69,20 +85,20 @@ export async function validateDhanToken(clientId: string, accessToken: string) {
 // Dhan's personal access tokens (from the "Access Token" tab in Profile, no
 // redirect URL) are short-lived — roughly 24 hours — but can be extended by
 // another 24 hours via this endpoint, as long as it's called BEFORE the token
-// fully expires. Call this at least once a day, every day (weekends included),
-// and the token effectively never expires without you touching anything.
-// Docs: https://dhanhq.co/docs/v2/authentication/
+// fully expires. Kept as a fallback — with TOTP now in place this generally
+// won't be needed, since the refresh cron mints a brand-new token every run.
 export async function renewDhanToken(
   clientId: string,
   accessToken: string
-): Promise<{ accessToken: string } | null> {
+): Promise<{ accessToken: string | null; raw: any } | null> {
   const res = await fetch(`${BASE_URL}/RenewToken`, {
     method: "PUT",
     headers: { "access-token": accessToken, "dhanClientId": clientId },
   });
   if (!res.ok) return null;
   const data = await res.json();
-  return { accessToken: data.accessToken };
+  const newToken = data.accessToken || data.access_token || data.token || null;
+  return { accessToken: newToken, raw: data };
 }
 
 export async function getDhanHoldings(
