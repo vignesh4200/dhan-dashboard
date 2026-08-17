@@ -3,9 +3,9 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 
-const inr = (n: number, d = 0) =>
-  "₹" + n.toLocaleString("en-IN", { minimumFractionDigits: d, maximumFractionDigits: d });
-const sign = (n: number) => (n >= 0 ? "+" : "−");
+const inr = (n: number | null | undefined, d = 0) =>
+  "₹" + (n ?? 0).toLocaleString("en-IN", { minimumFractionDigits: d, maximumFractionDigits: d });
+const sign = (n: number | null | undefined) => ((n ?? 0) >= 0 ? "+" : "−");
 
 function PerfChart({ points }: { points: { captured_at: string; total_current: number }[] }) {
   if (points.length < 2) {
@@ -44,6 +44,7 @@ export default function DashboardOverview() {
   const [movers, setMovers] = useState<any[]>([]);
   const [news, setNews] = useState<any[]>([]);
   const [events, setEvents] = useState<any[]>([]);
+  const [mfHoldings, setMfHoldings] = useState<any[]>([]);
 
   useEffect(() => {
     fetch("/api/portfolio").then((r) => {
@@ -58,6 +59,7 @@ export default function DashboardOverview() {
         fetch("/api/news").then((r) => r.json()).then((d) => setNews(d.news || []));
         fetch("/api/dividends").then((r) => r.json()).then((d) => setEvents(d.events || []));
       }
+      fetch("/api/mutual-funds").then((r) => r.json()).then((d) => setMfHoldings(d.holdings || []));
     });
   }, []);
 
@@ -75,6 +77,15 @@ export default function DashboardOverview() {
   const totalPnlPct = (data.total_pnl / data.total_invested) * 100;
   const inProfitPct = (data.holdings.filter((h: any) => h.pnl >= 0).length / data.holdings.length) * 100;
 
+  const mfTotalCurrent = mfHoldings.reduce((s, h) => s + (h.currentValue ?? 0), 0);
+  const mfTotalInvested = mfHoldings.reduce((s, h) => s + (h.invested ?? 0), 0);
+  const mfTotalGain = mfTotalCurrent - mfTotalInvested;
+  const mfTotalGainPct = mfTotalInvested > 0 ? (mfTotalGain / mfTotalInvested) * 100 : 0;
+  const combinedTotal = data.total_current + mfTotalCurrent;
+  const combinedInvested = data.total_invested + mfTotalInvested;
+  const combinedGain = combinedTotal - combinedInvested;
+  const combinedGainPct = combinedInvested > 0 ? (combinedGain / combinedInvested) * 100 : 0;
+
   return (
     <div>
       <div style={{ fontFamily: "var(--font-display)", fontSize: 22, fontWeight: 600 }}>Good day, Vignesh 👋</div>
@@ -84,10 +95,16 @@ export default function DashboardOverview() {
 
       <div style={{ marginTop: 22, borderRadius: 20, padding: "28px 30px", background: "linear-gradient(135deg,#6B5CE6 0%,#4B3FB0 100%)" }}>
         <div style={{ fontSize: 13, opacity: 0.85 }}>Total Portfolio Value</div>
-        <div style={{ fontFamily: "var(--font-display)", fontSize: 38, fontWeight: 700, marginTop: 10, color: "#fff" }}>{inr(data.total_current, 2)}</div>
+        <div style={{ fontFamily: "var(--font-display)", fontSize: 38, fontWeight: 700, marginTop: 10, color: "#fff" }}>{inr(combinedTotal, 2)}</div>
         <div style={{ marginTop: 8, fontSize: 13.5, color: data.day_pnl >= 0 ? "#B9F5DC" : "#FBD4CE", fontWeight: 600 }}>
           {sign(data.day_pnl)}{inr(Math.abs(data.day_pnl))} today
         </div>
+        {mfHoldings.length > 0 && (
+          <div style={{ marginTop: 14, display: "flex", gap: 18, fontSize: 12, opacity: 0.9, color: "#fff" }}>
+            <span>📈 Stocks: {inr(data.total_current)}</span>
+            <span>🏦 Mutual Funds: {inr(mfTotalCurrent)}</span>
+          </div>
+        )}
       </div>
 
       <div className="stat-grid" style={{ marginTop: 16 }}>
@@ -96,6 +113,15 @@ export default function DashboardOverview() {
         <div className="stat-card"><div className="stat-label">Day Change</div><div className="stat-value">{sign(data.day_pnl)}{inr(Math.abs(data.day_pnl))}</div></div>
         <div className="stat-card"><div className="stat-label">In Profit</div><div className="stat-value">{inProfitPct.toFixed(0)}%</div><div style={{ fontSize: 11.5, marginTop: 5, color: "var(--text-muted)" }}>of holdings</div></div>
       </div>
+
+      {mfHoldings.length > 0 && (
+        <div className="stat-grid" style={{ marginTop: 14 }}>
+          <div className="stat-card"><div className="stat-label">MF Invested</div><div className="stat-value">{inr(mfTotalInvested)}</div><div style={{ fontSize: 11.5, marginTop: 5, color: "var(--text-muted)" }}>{mfHoldings.length} funds</div></div>
+          <div className="stat-card"><div className="stat-label">MF Current Value</div><div className="stat-value">{inr(mfTotalCurrent)}</div><div style={{ fontSize: 11.5, marginTop: 5, color: mfTotalGainPct >= 0 ? "var(--gain)" : "var(--loss)" }}>{sign(mfTotalGainPct)}{Math.abs(mfTotalGainPct).toFixed(1)}%</div></div>
+          <div className="stat-card"><div className="stat-label">MF Gain</div><div className="stat-value" style={{ color: mfTotalGain >= 0 ? "var(--gain)" : "var(--loss)" }}>{sign(mfTotalGain)}{inr(Math.abs(mfTotalGain))}</div></div>
+          <div className="stat-card"><div className="stat-label">Combined Return</div><div className="stat-value" style={{ color: combinedGain >= 0 ? "var(--gain)" : "var(--loss)" }}>{sign(combinedGain)}{inr(Math.abs(combinedGain))}</div><div style={{ fontSize: 11.5, marginTop: 5, color: "var(--text-muted)" }}>{sign(combinedGainPct)}{Math.abs(combinedGainPct).toFixed(1)}% overall</div></div>
+        </div>
+      )}
 
       <div className="list-card" style={{ marginTop: 18 }}>
         <div className="list-head"><div className="list-title">Portfolio Performance</div></div>
@@ -111,6 +137,24 @@ export default function DashboardOverview() {
           </div>
         ))}
       </div>
+
+      {mfHoldings.length > 0 && (
+        <div className="list-card" style={{ marginTop: 18 }}>
+          <div className="list-head">
+            <div className="list-title">Mutual Fund Holdings <span style={{ fontSize: 10, background: "var(--gold-soft)", color: "var(--gold)", padding: "2px 7px", borderRadius: 100, marginLeft: 8 }}>via Groww</span></div>
+            <Link href="/dashboard/mutual-funds" className="list-link">View All →</Link>
+          </div>
+          {mfHoldings.slice(0, 5).map((h: any, i: number) => {
+            const pnlPct = h.invested > 0 ? (((h.currentValue ?? 0) - h.invested) / h.invested) * 100 : 0;
+            return (
+              <div key={i} style={{ display: "flex", justifyContent: "space-between", padding: "10px 0", borderBottom: "1px solid var(--border)", fontSize: 13 }}>
+                <span style={{ fontWeight: 600 }}>{h.schemeName}<span style={{ fontWeight: 400, color: "var(--text-muted)", fontSize: 11, marginLeft: 6 }}>{h.category}</span></span>
+                <span style={{ color: pnlPct >= 0 ? "var(--gain)" : "var(--loss)" }}>{sign(pnlPct)}{Math.abs(pnlPct).toFixed(1)}%</span>
+              </div>
+            );
+          })}
+        </div>
+      )}
 
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16, marginTop: 18 }}>
         <div className="list-card">
