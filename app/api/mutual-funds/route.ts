@@ -1,11 +1,12 @@
 import { NextResponse } from "next/server";
 import { getCurrentUser } from "@/lib/session";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
-import { getLatestNav } from "@/lib/mfapi";
 
-// Returns your saved mutual fund holdings with a freshly-fetched current NAV
-// per fund, so current value/returns are always up to date without needing
-// a background cron (MF NAVs only change once a day anyway).
+// Returns your saved mutual fund holdings. Units and Invested Value are
+// fixed from your last uploaded report; current_value (and therefore
+// returns) is kept fresh by the daily NAV-refresh cron for any holding with
+// a confirmed scheme code — recomputed here from the latest stored NAV
+// rather than trusting a possibly-stale saved "returns" number.
 export async function GET() {
   const user = await getCurrentUser();
   if (!user) return NextResponse.json({ error: "unauthenticated" }, { status: 401 });
@@ -13,30 +14,30 @@ export async function GET() {
   const { data: holdings } = await supabaseAdmin
     .from("mf_holdings")
     .select("*")
-    .eq("user_id", user.id);
+    .eq("user_id", user.id)
+    .order("current_value", { ascending: false });
 
-  if (!holdings || holdings.length === 0) return NextResponse.json({ holdings: [] });
-
-  const enriched = await Promise.all(
-    holdings.map(async (h) => {
-      const nav = h.scheme_code ? await getLatestNav(h.scheme_code) : null;
-      const currentNav = nav ?? h.avg_nav;
-      const currentValue = h.units * currentNav;
-      const pnl = currentValue - h.invested_amount;
+  return NextResponse.json({
+    holdings: (holdings || []).map((h) => {
+      const pnl = h.current_value - h.invested_amount;
       const pnlPct = h.invested_amount > 0 ? (pnl / h.invested_amount) * 100 : 0;
       return {
-        schemeCode: h.scheme_code,
         schemeName: h.scheme_name,
+        schemeCode: h.scheme_code,
+        amc: h.amc,
+        category: h.category,
+        subCategory: h.sub_category,
+        folioNo: h.folio_no,
         units: h.units,
         invested: h.invested_amount,
-        avgNav: h.avg_nav,
-        currentNav,
-        currentValue,
-        pnl,
-        pnlPct,
+        currentValue: h.current_value,
+        currentNav: h.current_nav,
+        returns: pnl,
+        returnsPct: pnlPct,
+        xirr: h.xirr,
+        reportDate: h.report_date,
+        navUpdatedAt: h.nav_updated_at,
       };
-    })
-  );
-
-  return NextResponse.json({ holdings: enriched });
+    }),
+  });
 }
