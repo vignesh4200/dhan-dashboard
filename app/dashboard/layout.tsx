@@ -9,11 +9,15 @@ const sign = (n: number) => (n >= 0 ? "+" : "−");
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const [holdings, setHoldings] = useState<any[]>([]);
+  const [mfTotal, setMfTotal] = useState(0);
 
   useEffect(() => {
     fetch("/api/portfolio")
       .then((r) => r.json())
       .then((d) => { if (!d.empty) setHoldings(d.holdings || []); });
+    fetch("/api/mutual-funds")
+      .then((r) => r.json())
+      .then((d) => setMfTotal((d.holdings || []).reduce((s: number, h: any) => s + (h.currentValue ?? 0), 0)));
   }, []);
 
   const navItems = [
@@ -24,6 +28,9 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
     { href: "/dashboard/alerts", label: "Alerts" },
     { href: "/settings", label: "Settings" },
   ];
+
+  const stocksTotal = holdings.reduce((s, h) => s + (h.current ?? 0), 0);
+  const assetSum = stocksTotal + mfTotal;
 
   const sectorTotals: Record<string, number> = {};
   let sectorSum = 0;
@@ -68,6 +75,14 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
               {item.label}
             </Link>
           ))}
+
+          {assetSum > 0 && mfTotal > 0 && (
+            <>
+              <div className="dash-sidebar-section">Asset mix</div>
+              <div className="dash-holding-row"><span>Stocks (Dhan)</span><span>{((stocksTotal / assetSum) * 100).toFixed(0)}%</span></div>
+              <div className="dash-holding-row"><span>Mutual Funds (Groww)</span><span>{((mfTotal / assetSum) * 100).toFixed(0)}%</span></div>
+            </>
+          )}
 
           {topSectors.length > 0 && (
             <>
