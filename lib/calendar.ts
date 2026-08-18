@@ -63,9 +63,9 @@ async function getEventsForOneSymbol(symbol: string): Promise<CalendarEvent[]> {
 }
 
 export async function getCalendarEvents(symbols: string[]): Promise<CalendarEvent[]> {
-  const unique = [...new Set(symbols)].slice(0, 10);
+  const unique = [...new Set(symbols)];
   const results = await Promise.all(unique.map(getEventsForOneSymbol));
   const flat = results.flat();
   flat.sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
-  return flat.slice(0, 8);
+  return flat.slice(0, 12);
 }
