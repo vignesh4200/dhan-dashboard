@@ -22,9 +22,11 @@ function extractTag(block: string, tag: string): string {
 async function getNewsForOneSymbol(symbol: string): Promise<NewsItem[]> {
   try {
     const companyName = await getCompanyName(symbol);
-    // Quoted company name forces closer phrase matching instead of Google
-    // News loosely matching individual words across unrelated articles.
-    const query = encodeURIComponent(`"${companyName}"`);
+    // Unquoted — Google News' natural relevance matching across the company
+    // name's words. An earlier version used a strict quoted exact phrase,
+    // which returned zero results for most holdings since real headlines
+    // rarely repeat a company's full legal name verbatim.
+    const query = encodeURIComponent(companyName);
     const res = await fetch(
       `https://news.google.com/rss/search?q=${query}&hl=en-IN&gl=IN&ceid=IN:en`,
       { headers: { "User-Agent": "Mozilla/5.0" } }
