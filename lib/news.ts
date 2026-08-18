@@ -1,7 +1,10 @@
-// News via Google News RSS — a stable, well-established public feed format,
-// switched to after Yahoo Finance's unofficial search endpoint proved
-// unreliable in practice. No API key needed; returns standard RSS/XML,
-// parsed here with a small regex-based parser (no new npm dependency).
+// News via Google News RSS — a stable, well-established public feed format.
+// Searches by real company name (resolved via getCompanyName), not raw
+// ticker symbol — searching "MAMATA" or "PGEL" as a bare keyword produced
+// loosely-matched, sometimes wrong results, since real articles don't use
+// ticker symbols in their text.
+import { getCompanyName } from "./yahoo-profile";
+
 export type NewsItem = {
   symbol: string;
   headline: string;
@@ -18,7 +21,10 @@ function extractTag(block: string, tag: string): string {
 
 async function getNewsForOneSymbol(symbol: string): Promise<NewsItem[]> {
   try {
-    const query = encodeURIComponent(`${symbol} NSE India stock`);
+    const companyName = await getCompanyName(symbol);
+    // Quoted company name forces closer phrase matching instead of Google
+    // News loosely matching individual words across unrelated articles.
+    const query = encodeURIComponent(`"${companyName}"`);
     const res = await fetch(
       `https://news.google.com/rss/search?q=${query}&hl=en-IN&gl=IN&ceid=IN:en`,
       { headers: { "User-Agent": "Mozilla/5.0" } }
