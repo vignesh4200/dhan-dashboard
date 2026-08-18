@@ -1,9 +1,9 @@
-// Dividend and earnings dates via Yahoo Finance's quoteSummary "calendarEvents"
-// module. Field names (dividendDate, earnings.earningsDate) are confirmed via
-// independent documentation — but Yahoo's raw HTTP API can return each date as
-// either { raw: <unix_seconds>, fmt: "YYYY-MM-DD" } or occasionally a bare
-// number. This version handles both shapes explicitly, rather than assuming
-// one, which was the likely cause of missing/wrong dates before.
+// Dividend and earnings dates via Yahoo Finance's quoteSummary
+// "calendarEvents" module — needs the cookie+crumb session (see
+// lib/yahoo-session.ts); this was the source of the "Invalid Crumb" error
+// that made every dividend lookup silently return nothing.
+import { fetchYahooAuthed } from "./yahoo-session";
+
 export type CalendarEvent = {
   symbol: string;
   type: "dividend" | "earnings";
@@ -13,7 +13,7 @@ export type CalendarEvent = {
 
 function parseDateField(field: any): string | null {
   if (!field) return null;
-  if (typeof field === "string") return field; // already formatted
+  if (typeof field === "string") return field;
   if (typeof field === "number") return new Date(field * 1000).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" });
   if (field.fmt) return field.fmt;
   if (typeof field.raw === "number") return new Date(field.raw * 1000).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" });
@@ -22,11 +22,10 @@ function parseDateField(field: any): string | null {
 
 async function getEventsForOneSymbol(symbol: string): Promise<CalendarEvent[]> {
   try {
-    const res = await fetch(
-      `https://query1.finance.yahoo.com/v10/finance/quoteSummary/${encodeURIComponent(symbol)}.NS?modules=calendarEvents`,
-      { headers: { "User-Agent": "Mozilla/5.0" } }
+    const res = await fetchYahooAuthed(
+      `https://query1.finance.yahoo.com/v10/finance/quoteSummary/${encodeURIComponent(symbol)}.NS?modules=calendarEvents`
     );
-    if (!res.ok) return [];
+    if (!res || !res.ok) return [];
     const data = await res.json();
     const cal = data?.quoteSummary?.result?.[0]?.calendarEvents;
     if (!cal) return [];
