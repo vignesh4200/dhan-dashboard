@@ -48,7 +48,7 @@ async function getNewsForOneSymbol(symbol: string): Promise<NewsItem[]> {
 }
 
 export async function getNewsForSymbols(symbols: string[]): Promise<NewsItem[]> {
-  const unique = [...new Set(symbols)].slice(0, 8);
+  const unique = [...new Set(symbols)];
   const results = await Promise.all(unique.map(getNewsForOneSymbol));
-  return results.flat().slice(0, 10);
+  return results.flat().slice(0, 15);
 }
