@@ -2,7 +2,6 @@
 import { useEffect, useState } from "react";
 import { usePathname } from "next/navigation";
 import Link from "next/link";
-import { sectorFor } from "@/lib/sectors";
 
 const sign = (n: number) => (n >= 0 ? "+" : "−");
 
@@ -35,7 +34,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   const sectorTotals: Record<string, number> = {};
   let sectorSum = 0;
   holdings.forEach((h) => {
-    const sec = sectorFor(h.symbol);
+    const sec = h.sector || "Other";
     sectorTotals[sec] = (sectorTotals[sec] || 0) + h.current;
     sectorSum += h.current;
   });
