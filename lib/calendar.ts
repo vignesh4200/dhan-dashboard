@@ -1,8 +1,10 @@
-// Dividend and earnings dates via Yahoo Finance's quoteSummary
-// "calendarEvents" module — needs the cookie+crumb session (see
-// lib/yahoo-session.ts); this was the source of the "Invalid Crumb" error
-// that made every dividend lookup silently return nothing.
+// Earnings dates come from Yahoo Finance's quoteSummary "calendarEvents"
+// module (works reasonably well for this). Dividend dates come from NSE
+// India's own corporate-actions endpoint instead — Yahoo's free dividend
+// data for Indian stocks turned out to be essentially empty when compared
+// directly against Dhan's own app, while NSE has the real data.
 import { fetchYahooAuthed } from "./yahoo-session";
+import { getDividendsForSymbols } from "./nse-dividends";
 
 export type CalendarEvent = {
   symbol: string;
@@ -25,9 +27,7 @@ function formatDate(d: Date): string {
 }
 
 // Only "upcoming" if it's actually in the future — Yahoo can return a stale
-// past date (their last known estimate) if they haven't refreshed it for
-// the next quarter yet, which is exactly what caused past earnings dates to
-// show up as "upcoming" before this fix.
+// past date (their last known estimate) if they haven't refreshed it yet.
 function isUpcoming(d: Date | null): d is Date {
   if (!d) return false;
   const startOfToday = new Date();
@@ -35,7 +35,7 @@ function isUpcoming(d: Date | null): d is Date {
   return d.getTime() >= startOfToday.getTime();
 }
 
-async function getEventsForOneSymbol(symbol: string): Promise<CalendarEvent[]> {
+async function getEarningsForOneSymbol(symbol: string): Promise<CalendarEvent[]> {
   try {
     const res = await fetchYahooAuthed(
       `https://query1.finance.yahoo.com/v10/finance/quoteSummary/${encodeURIComponent(symbol)}.NS?modules=calendarEvents`
@@ -45,18 +45,10 @@ async function getEventsForOneSymbol(symbol: string): Promise<CalendarEvent[]> {
     const cal = data?.quoteSummary?.result?.[0]?.calendarEvents;
     if (!cal) return [];
 
-    const events: CalendarEvent[] = [];
-
-    const divDate = parseDateField(cal.dividendDate);
-    if (isUpcoming(divDate)) events.push({ symbol, type: "dividend", label: "Upcoming dividend", date: formatDate(divDate) });
-
     const earningsDates: any[] = cal.earnings?.earningsDate || [];
-    // Some symbols return more than one candidate date (an estimate window)
-    // — take the first one that's actually upcoming, not just index 0.
     const upcomingEarnings = earningsDates.map(parseDateField).find(isUpcoming);
-    if (upcomingEarnings) events.push({ symbol, type: "earnings", label: "Quarterly results", date: formatDate(upcomingEarnings) });
-
-    return events;
+    if (!upcomingEarnings) return [];
+    return [{ symbol, type: "earnings", label: "Quarterly results", date: formatDate(upcomingEarnings) }];
   } catch {
     return [];
   }
@@ -64,8 +56,17 @@ async function getEventsForOneSymbol(symbol: string): Promise<CalendarEvent[]> {
 
 export async function getCalendarEvents(symbols: string[]): Promise<CalendarEvent[]> {
   const unique = [...new Set(symbols)];
-  const results = await Promise.all(unique.map(getEventsForOneSymbol));
-  const flat = results.flat();
-  flat.sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
-  return flat.slice(0, 12);
+
+  const [earningsResults, dividendResults] = await Promise.all([
+    Promise.all(unique.map(getEarningsForOneSymbol)),
+    getDividendsForSymbols(unique),
+  ]);
+
+  const events: CalendarEvent[] = [
+    ...earningsResults.flat(),
+    ...dividendResults.map((d) => ({ symbol: d.symbol, type: "dividend" as const, label: d.label, date: d.date })),
+  ];
+
+  events.sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+  return events.slice(0, 12);
 }
