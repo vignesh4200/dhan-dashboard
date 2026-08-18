@@ -30,3 +30,30 @@ export async function getSectorsForHoldings(symbols: string[]): Promise<Record<s
   unique.forEach((s, i) => { out[s] = results[i]; });
   return out;
 }
+
+// Resolves a ticker symbol to its real company name (e.g. "TEJASNET" ->
+// "Tejas Networks Limited"). News articles use company names, not ticker
+// symbols, so searching news by raw symbol alone produces loosely-matched,
+// sometimes wrong results — this fixes that at the source.
+export async function getCompanyName(tradingSymbol: string): Promise<string> {
+  try {
+    const res = await fetch(
+      `https://query1.finance.yahoo.com/v10/finance/quoteSummary/${encodeURIComponent(tradingSymbol)}.NS?modules=price`,
+      { headers: { "User-Agent": "Mozilla/5.0" } }
+    );
+    if (!res.ok) return tradingSymbol;
+    const data = await res.json();
+    const price = data?.quoteSummary?.result?.[0]?.price;
+    return price?.longName || price?.shortName || tradingSymbol;
+  } catch {
+    return tradingSymbol;
+  }
+}
+
+export async function getCompanyNames(symbols: string[]): Promise<Record<string, string>> {
+  const unique = [...new Set(symbols)];
+  const results = await Promise.all(unique.map((s) => getCompanyName(s)));
+  const out: Record<string, string> = {};
+  unique.forEach((s, i) => { out[s] = results[i]; });
+  return out;
+}
