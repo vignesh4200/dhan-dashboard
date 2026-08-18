@@ -2,10 +2,19 @@ import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import { decryptSecret, encryptSecret } from "@/lib/crypto";
 import { getDhanHoldings, getLtpFromYahoo, generateAccessTokenViaTotp } from "@/lib/dhan";
+import { getSectorsForHoldings } from "@/lib/yahoo-profile";
 import { generateTotpCode } from "@/lib/totp";
 import { computeHolding, tierFor, alertMessage } from "@/lib/alerts";
 import { sendWhatsAppAlert, isWhatsAppConfigured } from "@/lib/whatsapp";
 
+// Called every 15 minutes by an external cron pinger (e.g. cron-job.org) hitting:
+//   GET https://your-app.vercel.app/api/cron/refresh?secret=YOUR_CRON_SECRET
+//
+// Mints a completely FRESH Dhan access token on every single run using
+// Client ID + PIN + a live TOTP code — so the token is always brand new and
+// never has a chance to expire. Also fetches each holding's real sector via
+// Yahoo's assetProfile module and stores it on the snapshot, so the sidebar
+// doesn't need a separate slow live fetch on every page load.
 export async function GET(req: NextRequest) {
   const secret = req.nextUrl.searchParams.get("secret");
   if (secret !== process.env.CRON_SECRET) {
@@ -34,6 +43,7 @@ export async function GET(req: NextRequest) {
       }
       const accessToken = minted.accessToken;
 
+      // Cache it for on-demand routes (orders/trades) to reuse.
       await supabaseAdmin
         .from("dhan_credentials")
         .update({ access_token_encrypted: encryptSecret(accessToken), updated_at: new Date().toISOString() })
@@ -43,10 +53,12 @@ export async function GET(req: NextRequest) {
       if (rawHoldings.length === 0) continue;
 
       const ltpMap = await getLtpFromYahoo(rawHoldings);
+      const sectorMap = await getSectorsForHoldings(rawHoldings.map((h) => h.tradingSymbol));
 
-      const computed = rawHoldings.map((h) =>
-        computeHolding(h.tradingSymbol, h.totalQty, h.avgCostPrice, ltpMap[h.tradingSymbol] ?? h.avgCostPrice)
-      );
+      const computed = rawHoldings.map((h) => ({
+        ...computeHolding(h.tradingSymbol, h.totalQty, h.avgCostPrice, ltpMap[h.tradingSymbol] ?? h.avgCostPrice),
+        sector: sectorMap[h.tradingSymbol] || "Other",
+      }));
 
       const totalInvested = computed.reduce((s, h) => s + h.invested, 0);
       const totalCurrent = computed.reduce((s, h) => s + h.current, 0);
