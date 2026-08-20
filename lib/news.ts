@@ -41,8 +41,9 @@ async function getNewsForOneSymbol(symbol: string): Promise<NewsItem[]> {
       const pubDate = extractTag(block, "pubDate");
       const sourceMatch = block.match(/<source[^>]*>([\s\S]*?)<\/source>/i);
       const source = sourceMatch ? sourceMatch[1].replace(/<!\[CDATA\[/g, "").replace(/\]\]>/g, "").trim() : "Google News";
-      const when = pubDate ? new Date(pubDate).toLocaleDateString("en-IN", { day: "numeric", month: "short" }) : "";
-      return { symbol, headline: title, source, when, url: link };
+      const publishedAt = pubDate ? new Date(pubDate) : null;
+      const when = publishedAt ? publishedAt.toLocaleDateString("en-IN", { day: "numeric", month: "short" }) : "";
+      return { symbol, headline: title, source, when, url: link, publishedAt };
     });
   } catch {
     return [];
@@ -52,5 +53,14 @@ async function getNewsForOneSymbol(symbol: string): Promise<NewsItem[]> {
 export async function getNewsForSymbols(symbols: string[]): Promise<NewsItem[]> {
   const unique = [...new Set(symbols)];
   const results = await Promise.all(unique.map(getNewsForOneSymbol));
-  return results.flat().slice(0, 15);
+  const flat = results.flat() as (NewsItem & { publishedAt: Date | null })[];
+  // Sort by actual recency, not by whichever symbol happened to be
+  // processed first — otherwise the same 1-2 holdings dominate the display
+  // every time regardless of how many symbols actually returned news.
+  flat.sort((a, b) => {
+    const at = a.publishedAt ? a.publishedAt.getTime() : 0;
+    const bt = b.publishedAt ? b.publishedAt.getTime() : 0;
+    return bt - at;
+  });
+  return flat.slice(0, 15).map(({ publishedAt, ...rest }) => rest);
 }
