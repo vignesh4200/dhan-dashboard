@@ -62,5 +62,5 @@ export async function getNewsForSymbols(symbols: string[]): Promise<NewsItem[]> 
     const bt = b.publishedAt ? b.publishedAt.getTime() : 0;
     return bt - at;
   });
-  return flat.slice(0, 15).map(({ publishedAt, ...rest }) => rest);
+  return flat.map(({ publishedAt, ...rest }) => rest);
 }
