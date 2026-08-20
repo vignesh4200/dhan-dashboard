@@ -39,13 +39,14 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
     sectorSum += h.current;
   });
   const topSectors = Object.entries(sectorTotals).sort((a, b) => b[1] - a[1]).slice(0, 4);
+  const marqueeHoldings = [...holdings].sort((a, b) => (b.pnlPct ?? 0) - (a.pnlPct ?? 0));
 
   return (
     <>
       {holdings.length > 0 && (
         <div className="marquee-wrap">
           <div className="marquee-track">
-            {[...holdings, ...holdings].map((h, i) => (
+            {[...marqueeHoldings, ...marqueeHoldings].map((h, i) => (
               <span className="marquee-item" key={i}>
                 <span style={{ color: "var(--text-muted)" }}>{h.symbol}</span>
                 <span style={{ fontWeight: 600 }}>{h.ltp.toFixed(2)}</span>
