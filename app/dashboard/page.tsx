@@ -167,10 +167,10 @@ export default function DashboardOverview() {
               </div>
             ))}
         </div>
-        <div className="list-card">
+        <div className="list-card" style={{ maxHeight: 420, overflowY: "auto" }}>
           <div className="list-head"><div className="list-title">Stock News</div></div>
           {news.length === 0 ? <div style={{ color: "var(--text-muted)", fontSize: 12.5 }}>No news found.</div> :
-            news.slice(0, 3).map((n, i) => (
+            news.map((n, i) => (
               <a key={i} href={n.url} target="_blank" rel="noreferrer" style={{ display: "block", padding: "9px 0", borderBottom: "1px solid var(--border)", textDecoration: "none", color: "var(--text)" }}>
                 <div style={{ fontSize: 12.5 }}>{n.headline}</div>
                 <div style={{ fontSize: 10.5, color: "var(--text-muted)", marginTop: 3 }}>{n.symbol} · {n.source}</div>
