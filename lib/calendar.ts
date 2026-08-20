@@ -68,5 +68,5 @@ export async function getCalendarEvents(symbols: string[]): Promise<CalendarEven
   ];
 
   events.sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
-  return events.slice(0, 12);
+  return events;
 }
