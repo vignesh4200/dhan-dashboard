@@ -86,6 +86,48 @@ export default function DashboardOverview() {
   const combinedGain = combinedTotal - combinedInvested;
   const combinedGainPct = combinedInvested > 0 ? (combinedGain / combinedInvested) * 100 : 0;
 
+  // 1. Estimated dividend income — sum (per-share amount parsed from the
+  // event label) × (units held) across all upcoming dividends.
+  const estDividendIncome = events
+    .filter((e: any) => e.type === "dividend")
+    .reduce((sum: number, e: any) => {
+      const holding = data.holdings.find((h: any) => h.symbol === e.symbol);
+      if (!holding) return sum;
+      const amountMatch = (e.label || "").match(/Rs\.?\s*([\d.]+)/i);
+      const perShare = amountMatch ? parseFloat(amountMatch[1]) : 0;
+      return sum + perShare * holding.qty;
+    }, 0);
+  const dividendCount = events.filter((e: any) => e.type === "dividend").length;
+
+  // 2. Sector performance — weighted overall return % per sector (not
+  // "today", since we don't track reliable per-holding day-level change).
+  const sectorPerf: Record<string, { invested: number; pnl: number }> = {};
+  data.holdings.forEach((h: any) => {
+    const sec = h.sector || "Other";
+    sectorPerf[sec] = sectorPerf[sec] || { invested: 0, pnl: 0 };
+    sectorPerf[sec].invested += h.invested;
+    sectorPerf[sec].pnl += h.pnl;
+  });
+  const sectorPerfList = Object.entries(sectorPerf)
+    .map(([sec, v]) => ({ sec, pct: v.invested > 0 ? (v.pnl / v.invested) * 100 : 0 }))
+    .sort((a, b) => b.pct - a.pct);
+
+  // 3. Concentration — how much of the portfolio sits in the top 3 holdings.
+  const sortedByValue = [...data.holdings].sort((a: any, b: any) => b.current - a.current);
+  const top3Value = sortedByValue.slice(0, 3).reduce((s: number, h: any) => s + h.current, 0);
+  const top3Pct = data.total_current > 0 ? (top3Value / data.total_current) * 100 : 0;
+
+  // 4. Mutual fund asset mix by category (Equity/Hybrid/Debt, from Groww).
+  const mfCategoryTotals: Record<string, number> = {};
+  mfHoldings.forEach((h: any) => {
+    const cat = h.category || "Other";
+    mfCategoryTotals[cat] = (mfCategoryTotals[cat] || 0) + (h.currentValue ?? 0);
+  });
+  const mfCategoryList = Object.entries(mfCategoryTotals).sort((a, b) => b[1] - a[1]);
+
+  // 5. Biggest ₹ impact — largest absolute overall gain/loss, not just %.
+  const biggestImpact = [...data.holdings].sort((a: any, b: any) => Math.abs(b.pnl) - Math.abs(a.pnl)).slice(0, 5);
+
   return (
     <div>
       <div style={{ fontFamily: "var(--font-display)", fontSize: 22, fontWeight: 600 }}>Good day, Vignesh 👋</div>
@@ -155,6 +197,55 @@ export default function DashboardOverview() {
           })}
         </div>
       )}
+
+      <div className="list-card" style={{ marginTop: 18 }}>
+        <div className="list-head"><div className="list-title">Portfolio Insights</div></div>
+
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(2, 1fr)", gap: 14, marginBottom: 20 }}>
+          <div>
+            <div style={{ fontSize: 11.5, color: "var(--text-muted)" }}>Estimated Dividend Income</div>
+            <div style={{ fontSize: 18, fontWeight: 600, marginTop: 4, color: "var(--gain)" }}>{inr(estDividendIncome)}</div>
+            <div style={{ fontSize: 10.5, color: "var(--text-muted)", marginTop: 2 }}>from {dividendCount} upcoming payout{dividendCount === 1 ? "" : "s"}</div>
+          </div>
+          <div>
+            <div style={{ fontSize: 11.5, color: "var(--text-muted)" }}>Concentration</div>
+            <div style={{ fontSize: 18, fontWeight: 600, marginTop: 4 }}>{top3Pct.toFixed(0)}%</div>
+            <div style={{ fontSize: 10.5, color: "var(--text-muted)", marginTop: 2 }}>in your top 3 holdings</div>
+          </div>
+        </div>
+
+        <div style={{ marginBottom: 20 }}>
+          <div style={{ fontSize: 11.5, color: "var(--text-muted)", marginBottom: 8 }}>Sector Performance (overall return)</div>
+          {sectorPerfList.map(({ sec, pct }) => (
+            <div key={sec} style={{ display: "flex", justifyContent: "space-between", padding: "7px 0", borderBottom: "1px solid var(--border)", fontSize: 12.5 }}>
+              <span>{sec}</span>
+              <span style={{ color: pct >= 0 ? "var(--gain)" : "var(--loss)" }}>{sign(pct)}{Math.abs(pct).toFixed(1)}%</span>
+            </div>
+          ))}
+        </div>
+
+        {mfCategoryList.length > 0 && (
+          <div style={{ marginBottom: 20 }}>
+            <div style={{ fontSize: 11.5, color: "var(--text-muted)", marginBottom: 8 }}>Mutual Fund Asset Mix</div>
+            {mfCategoryList.map(([cat, val]) => (
+              <div key={cat} style={{ display: "flex", justifyContent: "space-between", padding: "7px 0", borderBottom: "1px solid var(--border)", fontSize: 12.5 }}>
+                <span>{cat}</span>
+                <span>{mfTotalCurrent > 0 ? ((val / mfTotalCurrent) * 100).toFixed(0) : 0}% · {inr(val)}</span>
+              </div>
+            ))}
+          </div>
+        )}
+
+        <div>
+          <div style={{ fontSize: 11.5, color: "var(--text-muted)", marginBottom: 8 }}>Biggest ₹ Impact (overall)</div>
+          {biggestImpact.map((h: any) => (
+            <div key={h.symbol} style={{ display: "flex", justifyContent: "space-between", padding: "7px 0", borderBottom: "1px solid var(--border)", fontSize: 12.5 }}>
+              <span>{h.symbol}</span>
+              <span style={{ color: h.pnl >= 0 ? "var(--gain)" : "var(--loss)" }}>{sign(h.pnl)}{inr(Math.abs(h.pnl))}</span>
+            </div>
+          ))}
+        </div>
+      </div>
 
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16, marginTop: 18 }}>
         <div className="list-card">
