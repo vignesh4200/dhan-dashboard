@@ -1,9 +1,12 @@
 // NSE India's corporate-actions endpoint — the authoritative source for
-// Indian stock dividends. Confirmed against a real response (Aug 2026):
+// Indian stock dividends, confirmed against a real response (Aug 2026):
 // fields are exDate ("DD-MMM-YYYY"), subject (free text), symbol, comp.
-// The endpoint returns full history (years of past entries), not just
-// upcoming ones, so filtering for future dates happens here.
+// This endpoint can lag behind actual board declarations by weeks/months
+// though (confirmed: Triveni Turbine's dividend was announced in May but
+// still wasn't in this feed by August), so it's combined with the faster
+// corporate-announcements feed in getDividendsForSymbols below.
 import { fetchNseAuthed } from "./nse-session";
+import { getDividendsFromAnnouncements } from "./nse-announcements";
 
 export type NseDividend = {
   symbol: string;
@@ -67,6 +70,23 @@ async function getDividendForOneSymbol(symbol: string): Promise<NseDividend | nu
 
 export async function getDividendsForSymbols(symbols: string[]): Promise<NseDividend[]> {
   const unique = [...new Set(symbols)];
-  const results = await Promise.all(unique.map(getDividendForOneSymbol));
-  return results.filter((r): r is NseDividend => r !== null);
+
+  const [fromActions, fromAnnouncements] = await Promise.all([
+    Promise.all(unique.map(getDividendForOneSymbol)),
+    getDividendsFromAnnouncements(unique),
+  ]);
+
+  // Merge: prefer whichever source has the nearest upcoming date per symbol.
+  const bySymbol = new Map<string, NseDividend>();
+  for (const d of fromActions) {
+    if (d) bySymbol.set(d.symbol, d);
+  }
+  for (const d of fromAnnouncements) {
+    const existing = bySymbol.get(d.symbol);
+    if (!existing || new Date(d.date).getTime() < new Date(existing.date).getTime()) {
+      bySymbol.set(d.symbol, d);
+    }
+  }
+
+  return [...bySymbol.values()];
 }
