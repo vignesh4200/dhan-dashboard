@@ -22,7 +22,7 @@ export async function GET() {
   }
 
   const codes = [...new Set(holdings.map((h) => h.scheme_code as string))];
-  const amfiNavs = await getAmfiNavsBySchemeCode(codes);
+  const { navs: amfiNavs, diag } = await getAmfiNavsBySchemeCode(codes);
 
   const comparisons = holdings.map((h) => {
     const amfi = amfiNavs[h.scheme_code as string];
@@ -39,5 +39,5 @@ export async function GET() {
     };
   });
 
-  return NextResponse.json({ comparisons });
+  return NextResponse.json({ comparisons, diagnostics: diag, requestedCodes: codes });
 }
