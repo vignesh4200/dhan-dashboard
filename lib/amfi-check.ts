@@ -69,14 +69,19 @@ export async function getAmfiNavsBySchemeCode(
 
   for (const line of lines) {
     const parts = line.split(";");
-    if (parts.length < 6) continue;
+    if (parts.length < 4) continue;
     diag.totalDataLinesWithSemicolons++;
     const schemeCode = parts[0].trim();
     if (diag.sampleSchemeCodes.length < 5) diag.sampleSchemeCodes.push(schemeCode);
     if (!wanted.has(schemeCode)) continue;
-    const schemeName = parts[3].trim();
-    const nav = parseFloat(parts[4].trim());
-    const date = parts[5].trim();
+
+    // AMFI splits "Scheme Name", "Plan", and "Option" across separate
+    // semicolon fields rather than one combined name field — so the field
+    // count varies. NAV and Date are always the last two fields regardless,
+    // so read from the end rather than assuming a fixed position.
+    const date = parts[parts.length - 1].trim();
+    const nav = parseFloat(parts[parts.length - 2].trim());
+    const schemeName = parts.slice(3, parts.length - 2).join(" ").trim();
     if (isNaN(nav)) continue;
     out[schemeCode] = { schemeCode, schemeName, nav, date };
   }
