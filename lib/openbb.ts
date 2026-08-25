@@ -13,6 +13,8 @@
 // OpenBB's documented router naming pattern, but the platform evolves fast —
 // once you have your own server running, hit its /docs (FastAPI Swagger UI)
 // page and adjust the paths here if yours differ.
+// VERIFIED 2026-08-25: /api/v1/equity/price/quote and /api/v1/news/company
+// both confirmed working against the live self-hosted OpenBB server.
 
 const BASE_URL = process.env.OPENBB_API_URL;
 const API_KEY = process.env.OPENBB_API_KEY;
