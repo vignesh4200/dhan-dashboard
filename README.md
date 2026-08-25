@@ -127,3 +127,17 @@ This job prevents that.
 - **WhatsApp template approval**: business-initiated messages (like this
   alert) always require an approved template — free-form messages only work
   within 24 hours of the user messaging you first.
+
+---
+
+## 7. OpenBB Research panel (optional)
+
+The Research tab pulls quotes and company news via a self-hosted OpenBB Open Data Platform (ODP) REST server. It is **not** a hosted service — you deploy it yourself, same free-tier spirit as everything else here. Skip this section and the Research tab will just show a "not connected yet" message.
+
+1. Deploy the OpenBB ODP REST server somewhere free (Render, Railway, Fly.io) or run it locally while testing:
+   - `pip install openbb openbb-api`
+   - `openbb-api` (starts a FastAPI server; check its `/docs` page for the exact route paths and adjust `lib/openbb.ts` if they differ from what's there)
+2. In Vercel's Environment Variables screen, add:
+   - `OPENBB_API_URL` — the base URL of your deployed ODP server
+   - `OPENBB_API_KEY` — optional, only if your deployment requires a bearer token
+3. Redeploy. The Research tab in the sidebar will start showing data once it can reach your server.
