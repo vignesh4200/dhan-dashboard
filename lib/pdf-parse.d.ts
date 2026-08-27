@@ -3,7 +3,7 @@
 // minimal ambient declaration covering only what we actually use (the
 // default export as a function returning parsed text), so the build's
 // type-checker knows its shape without needing another external dependency.
-declare module "pdf-parse" {
+declare module "pdf-parse/lib/pdf-parse.js" {
   interface PdfParseResult {
     text: string;
     numpages?: number;
@@ -15,5 +15,5 @@ declare module "pdf-parse" {
 
   function pdfParse(dataBuffer: Buffer, options?: any): Promise<PdfParseResult>;
 
-  export = pdfParse;
+  export default pdfParse;
 }
