@@ -1,16 +1,19 @@
 // NSE India's corporate-announcements endpoint — confirmed (Aug 2026) to
 // carry dividend declarations weeks/months before they show up in the
 // corporate-actions feed. This correlates a "Record Date" announcement
-// (which gives the exact date) with a "Dividend" announcement (which gives
-// the amount) to reconstruct the same kind of entry corporate-actions would
-// eventually have.
+// (which gives the exact date) with whichever earlier announcement actually
+// states the per-share amount — to reconstruct the same kind of entry
+// corporate-actions would eventually have.
 //
-// Important: the amount announcement and the record-date fixation can be
-// MONTHS apart, not days — e.g. RITES announced its ₹2.75 Final Dividend on
-// 19-May-2026, but the Record Date wasn't fixed until 25-Aug-2026. So this
-// matches by dividend TYPE (Final vs Interim, parsed from the record date
-// text) and takes the most recent matching declaration before the record
-// date announcement, rather than assuming they're close in time.
+// Two real-world quirks confirmed via direct testing (Aug 2026):
+// 1. The amount announcement and the record-date fixation can be MONTHS
+//    apart, not days — e.g. RITES announced its ₹2.75 Final Dividend on
+//    19-May-2026, but the Record Date wasn't fixed until 25-Aug-2026.
+// 2. Companies don't consistently tag the amount announcement with
+//    desc:"Dividend" — HBL Engineering's dividend amount was embedded
+//    inside a desc:"Outcome of Board Meeting" announcement instead. So
+//    this searches ALL announcements for a Rs-per-share pattern, not just
+//    ones specifically labeled "Dividend".
 import { fetchNseAuthed } from "./nse-session";
 
 export type NseDividend = {
@@ -50,6 +53,8 @@ function dividendType(text: string): "final" | "interim" | "special" | "unknown"
   return "unknown";
 }
 
+const AMOUNT_PATTERN = /Rs\.?\s*[\d.]+(?:\s*\([^)]*\))?\s*per\s*(?:equity\s*)?share/i;
+
 async function getAnnouncementsForOneSymbol(symbol: string): Promise<NseDividend | null> {
   try {
     const res = await fetchNseAuthed(
@@ -68,8 +73,6 @@ async function getAnnouncementsForOneSymbol(symbol: string): Promise<NseDividend
       return desc === "record date" && text.includes("dividend");
     });
 
-    const dividendDeclEntries = list.filter((item) => (item.desc || "").toLowerCase() === "dividend");
-
     let best: { date: Date; label: string } | null = null;
 
     for (const rd of recordDateEntries) {
@@ -79,17 +82,15 @@ async function getAnnouncementsForOneSymbol(symbol: string): Promise<NseDividend
       const rdAnnouncedAt = parseNseDate(rd.an_dt || "");
       const rdType = dividendType(rd.attchmntText || "");
 
-      const candidates = dividendDeclEntries
+      const candidates = list
         .map((d) => ({ d, declAt: parseNseDate(d.an_dt || "") }))
         .filter((c) => c.declAt && (!rdAnnouncedAt || c.declAt <= rdAnnouncedAt))
-        .filter((c) => rdType === "unknown" || dividendType(c.d.attchmntText || "") === rdType)
+        .filter((c) => AMOUNT_PATTERN.test(c.d.attchmntText || ""))
+        .filter((c) => rdType === "unknown" || dividendType(c.d.attchmntText || "") === "unknown" || dividendType(c.d.attchmntText || "") === rdType)
         .sort((a, b) => (b.declAt as Date).getTime() - (a.declAt as Date).getTime());
 
       const matchingDecl = candidates[0]?.d;
-
-      const amountMatch = matchingDecl
-        ? (matchingDecl.attchmntText || "").match(/Rs\.?\s*[\d.]+(?:\s*\([^)]*\))?\s*per\s*(?:equity\s*)?share/i)
-        : null;
+      const amountMatch = matchingDecl ? (matchingDecl.attchmntText || "").match(AMOUNT_PATTERN) : null;
       const label = amountMatch ? amountMatch[0] : "Dividend (amount pending approval)";
 
       if (!best || date < best.date) {
