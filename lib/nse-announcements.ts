@@ -5,16 +5,21 @@
 // states the per-share amount — to reconstruct the same kind of entry
 // corporate-actions would eventually have.
 //
-// Two real-world quirks confirmed via direct testing (Aug 2026):
+// Real-world quirks confirmed via direct testing (Aug 2026):
 // 1. The amount announcement and the record-date fixation can be MONTHS
 //    apart, not days — e.g. RITES announced its ₹2.75 Final Dividend on
 //    19-May-2026, but the Record Date wasn't fixed until 25-Aug-2026.
 // 2. Companies don't consistently tag the amount announcement with
-//    desc:"Dividend" — HBL Engineering's dividend amount was embedded
-//    inside a desc:"Outcome of Board Meeting" announcement instead. So
-//    this searches ALL announcements for a Rs-per-share pattern, not just
-//    ones specifically labeled "Dividend".
+//    desc:"Dividend" — HBL Engineering's dividend was inside a
+//    desc:"Outcome of Board Meeting" announcement instead. So this searches
+//    ALL announcements for a Rs-per-share pattern, not just ones labeled
+//    "Dividend".
+// 3. Sometimes the amount isn't in NSE's short auto-generated summary text
+//    at all — only inside the attached PDF. When that happens, this falls
+//    back to downloading and reading the single most likely PDF (the
+//    nearest type-matching announcement before the record date).
 import { fetchNseAuthed } from "./nse-session";
+import { extractPdfText } from "./pdf-text";
 
 export type NseDividend = {
   symbol: string;
@@ -27,6 +32,9 @@ const MONTHS: Record<string, number> = {
   jul: 6, aug: 7, sep: 8, oct: 9, nov: 10, dec: 11,
 };
 
+// NSE filings write dates in more than one format — usually "18-May-2026",
+// but sometimes in prose like "September 20, 2026" (seen in RITES' record
+// date filing). This tries both rather than assuming one.
 function parseNseDate(raw: string): Date | null {
   const abbrevMatch = raw.match(/(\d{1,2})-([A-Za-z]{3})-(\d{4})/);
   if (abbrevMatch) {
@@ -53,7 +61,27 @@ function dividendType(text: string): "final" | "interim" | "special" | "unknown"
   return "unknown";
 }
 
-const AMOUNT_PATTERN = /Rs\.?\s*[\d.]+(?:\s*\([^)]*\))?\s*per\s*(?:equity\s*)?share/i;
+// Handles "Rs." and "Re." (both used in Indian financial filings) and the
+// common "/-" suffix (e.g. "Rs. 1/- per equity share").
+const AMOUNT_PATTERN = /R[se]\.?\s*[\d.]+\s*\/?-?(?:\s*\([^)]*\))?\s*per\s*(?:equity\s*)?share/i;
+
+// Requires "dividend" to appear near the amount (either side, within ~80
+// characters), since a Rs-per-share pattern alone can also match unrelated
+// figures like EPS in the same document (confirmed: a looser match once
+// grabbed an unrelated figure instead of the real dividend amount).
+function findDividendAmount(text: string): string | null {
+  const nearDividendAfter = text.match(new RegExp(`dividend[\\s\\S]{0,80}?${AMOUNT_PATTERN.source}`, "i"));
+  if (nearDividendAfter) {
+    const amountOnly = nearDividendAfter[0].match(AMOUNT_PATTERN);
+    if (amountOnly) return amountOnly[0];
+  }
+  const nearDividendBefore = text.match(new RegExp(`${AMOUNT_PATTERN.source}[\\s\\S]{0,80}?dividend`, "i"));
+  if (nearDividendBefore) {
+    const amountOnly = nearDividendBefore[0].match(AMOUNT_PATTERN);
+    if (amountOnly) return amountOnly[0];
+  }
+  return null;
+}
 
 async function getAnnouncementsForOneSymbol(symbol: string): Promise<NseDividend | null> {
   try {
@@ -82,16 +110,39 @@ async function getAnnouncementsForOneSymbol(symbol: string): Promise<NseDividend
       const rdAnnouncedAt = parseNseDate(rd.an_dt || "");
       const rdType = dividendType(rd.attchmntText || "");
 
-      const candidates = list
+      // Step 1: text-only search across all announcements — fast.
+      const textCandidates = list
         .map((d) => ({ d, declAt: parseNseDate(d.an_dt || "") }))
         .filter((c) => c.declAt && (!rdAnnouncedAt || c.declAt <= rdAnnouncedAt))
-        .filter((c) => AMOUNT_PATTERN.test(c.d.attchmntText || ""))
-        .filter((c) => rdType === "unknown" || dividendType(c.d.attchmntText || "") === "unknown" || dividendType(c.d.attchmntText || "") === rdType)
+        .filter((c) => findDividendAmount(c.d.attchmntText || "") !== null)
+        .filter((c) => rdType === "unknown" || dividendType(c.d.attchmntText || "") === rdType)
         .sort((a, b) => (b.declAt as Date).getTime() - (a.declAt as Date).getTime());
 
-      const matchingDecl = candidates[0]?.d;
-      const amountMatch = matchingDecl ? (matchingDecl.attchmntText || "").match(AMOUNT_PATTERN) : null;
-      const label = amountMatch ? amountMatch[0] : "Dividend (amount pending approval)";
+      let label: string | null = null;
+      const textMatch = textCandidates[0]?.d;
+      if (textMatch) {
+        label = findDividendAmount(textMatch.attchmntText || "");
+      }
+
+      // Step 2: if the text search found nothing, fall back to reading the
+      // single most likely PDF (an "Outcome of Board Meeting" announcement
+      // close to and before the record date, matching type where known).
+      if (!label) {
+        const pdfCandidates = list
+          .map((d) => ({ d, declAt: parseNseDate(d.an_dt || "") }))
+          .filter((c) => c.declAt && (!rdAnnouncedAt || c.declAt <= rdAnnouncedAt))
+          .filter((c) => (c.d.desc || "").toLowerCase().includes("board meeting"))
+          .filter((c) => rdType === "unknown" || dividendType(c.d.attchmntText || "") === "unknown" || dividendType(c.d.attchmntText || "") === rdType)
+          .sort((a, b) => (b.declAt as Date).getTime() - (a.declAt as Date).getTime());
+
+        const pdfCandidate = pdfCandidates[0]?.d;
+        if (pdfCandidate?.attchmntFile) {
+          const pdfText = await extractPdfText(pdfCandidate.attchmntFile);
+          if (pdfText) label = findDividendAmount(pdfText);
+        }
+      }
+
+      if (!label) label = "Dividend (amount pending approval)";
 
       if (!best || date < best.date) {
         best = { date, label };
