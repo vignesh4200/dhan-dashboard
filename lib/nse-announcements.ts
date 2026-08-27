@@ -19,18 +19,25 @@ const MONTHS: Record<string, number> = {
   jul: 6, aug: 7, sep: 8, oct: 9, nov: 10, dec: 11,
 };
 
+// NSE filings write dates in more than one format — usually "18-May-2026",
+// but sometimes in prose like "September 20, 2026" (seen in RITES' record
+// date filing). This tries both rather than assuming one.
 function parseNseDate(raw: string): Date | null {
-  const match = raw.match(/(\d{1,2})-([A-Za-z]{3})-(\d{4})/);
-  if (!match) return null;
-  const [, day, monAbbr, year] = match;
-  const month = MONTHS[monAbbr.toLowerCase()];
-  if (month === undefined) return null;
-  return new Date(parseInt(year), month, parseInt(day));
-}
+  const abbrevMatch = raw.match(/(\d{1,2})-([A-Za-z]{3})-(\d{4})/);
+  if (abbrevMatch) {
+    const [, day, monAbbr, year] = abbrevMatch;
+    const month = MONTHS[monAbbr.toLowerCase()];
+    if (month !== undefined) return new Date(parseInt(year), month, parseInt(day));
+  }
 
-// an_dt looks like "18-May-2026 18:58:56"
-function parseAnDt(raw: string): Date | null {
-  return parseNseDate(raw);
+  const proseMatch = raw.match(/([A-Za-z]+)\s+(\d{1,2}),?\s+(\d{4})/);
+  if (proseMatch) {
+    const [, monName, day, year] = proseMatch;
+    const month = MONTHS[monName.toLowerCase().slice(0, 3)];
+    if (month !== undefined) return new Date(parseInt(year), month, parseInt(day));
+  }
+
+  return null;
 }
 
 async function getAnnouncementsForOneSymbol(symbol: string): Promise<NseDividend | null> {
@@ -56,14 +63,12 @@ async function getAnnouncementsForOneSymbol(symbol: string): Promise<NseDividend
     let best: { date: Date; label: string } | null = null;
 
     for (const rd of recordDateEntries) {
-      const dateMatch = (rd.attchmntText || "").match(/(\d{1,2}-[A-Za-z]{3}-\d{4})/);
-      if (!dateMatch) continue;
-      const date = parseNseDate(dateMatch[1]);
+      const date = parseNseDate(rd.attchmntText || "");
       if (!date || date < today) continue;
 
-      const rdAnnouncedAt = parseAnDt(rd.an_dt || "");
+      const rdAnnouncedAt = parseNseDate(rd.an_dt || "");
       const matchingDecl = dividendDeclEntries.find((d) => {
-        const declAt = parseAnDt(d.an_dt || "");
+        const declAt = parseNseDate(d.an_dt || "");
         if (!declAt || !rdAnnouncedAt) return false;
         return Math.abs(declAt.getTime() - rdAnnouncedAt.getTime()) < 3 * 24 * 60 * 60 * 1000;
       });
@@ -71,7 +76,7 @@ async function getAnnouncementsForOneSymbol(symbol: string): Promise<NseDividend
       const amountMatch = matchingDecl
         ? (matchingDecl.attchmntText || "").match(/Rs\.?\s*[\d.]+(?:\s*\([^)]*\))?\s*per\s*(?:equity\s*)?share/i)
         : null;
-      const label = amountMatch ? amountMatch[0] : "Dividend";
+      const label = amountMatch ? amountMatch[0] : "Dividend (amount pending approval)";
 
       if (!best || date < best.date) {
         best = { date, label };
