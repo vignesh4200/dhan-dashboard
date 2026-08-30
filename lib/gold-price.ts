@@ -70,7 +70,12 @@ export async function fetchIbjaRates(): Promise<{ rates: GoldRates | null; diag:
     diag.pageLength = html.length;
 
     const text = stripHtml(html);
-    const rateSectionIndex = text.indexOf("indicative Retail selling Rates");
+    // IBJA's page contains this section header text twice — an old stale
+    // cached block first, then the real current one later. Confirmed via
+    // direct inspection (Aug 2026): the stale block showed "07/01/2020"
+    // with wrong rates, while the real one further down showed today's
+    // actual date and correct rates. Use the LAST occurrence, not the first.
+    const rateSectionIndex = text.lastIndexOf("indicative Retail selling Rates");
     const searchText = rateSectionIndex !== -1 ? text.slice(rateSectionIndex, rateSectionIndex + 800) : text;
     diag.cleanedTextSample = searchText.slice(0, 400);
 
