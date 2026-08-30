@@ -50,5 +50,6 @@ export async function GET(req: NextRequest) {
     rates,
     updated,
     skipped,
+    diag,
   });
 }
