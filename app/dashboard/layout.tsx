@@ -9,6 +9,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   const pathname = usePathname();
   const [holdings, setHoldings] = useState<any[]>([]);
   const [mfTotal, setMfTotal] = useState(0);
+  const [goldTotal, setGoldTotal] = useState(0);
 
   useEffect(() => {
     fetch("/api/portfolio")
@@ -17,20 +18,23 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
     fetch("/api/mutual-funds")
       .then((r) => r.json())
       .then((d) => setMfTotal((d.holdings || []).reduce((s: number, h: any) => s + (h.currentValue ?? 0), 0)));
+    fetch("/api/gold")
+      .then((r) => r.json())
+      .then((d) => setGoldTotal((d.holdings || []).reduce((s: number, h: any) => s + (h.currentValue ?? 0), 0)));
   }, []);
 
   const navItems = [
     { href: "/dashboard", label: "Dashboard" },
     { href: "/dashboard/holdings", label: "Holdings" },
     { href: "/dashboard/mutual-funds", label: "Mutual Funds" },
+    { href: "/dashboard/gold", label: "Gold" },
     { href: "/dashboard/orders", label: "Orders" },
     { href: "/dashboard/alerts", label: "Alerts" },
-    { href: "/dashboard/research", label: "Research" },
     { href: "/settings", label: "Settings" },
   ];
 
   const stocksTotal = holdings.reduce((s, h) => s + (h.current ?? 0), 0);
-  const assetSum = stocksTotal + mfTotal;
+  const assetSum = stocksTotal + mfTotal + goldTotal;
 
   const sectorTotals: Record<string, number> = {};
   let sectorSum = 0;
@@ -77,11 +81,12 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
             </Link>
           ))}
 
-          {assetSum > 0 && mfTotal > 0 && (
+          {assetSum > 0 && (mfTotal > 0 || goldTotal > 0) && (
             <>
               <div className="dash-sidebar-section">Asset mix</div>
               <div className="dash-holding-row"><span>Stocks (Dhan)</span><span>{((stocksTotal / assetSum) * 100).toFixed(0)}%</span></div>
-              <div className="dash-holding-row"><span>Mutual Funds (Groww)</span><span>{((mfTotal / assetSum) * 100).toFixed(0)}%</span></div>
+              {mfTotal > 0 && <div className="dash-holding-row"><span>Mutual Funds (Groww)</span><span>{((mfTotal / assetSum) * 100).toFixed(0)}%</span></div>}
+              {goldTotal > 0 && <div className="dash-holding-row"><span>Gold (IBJA)</span><span>{((goldTotal / assetSum) * 100).toFixed(0)}%</span></div>}
             </>
           )}
 
