@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useState } from "react";
+import { useEffect, useState, MouseEvent as ReactMouseEvent } from "react";
 
 const inr = (n: number | null | undefined, d = 0) =>
   "₹" + (n ?? 0).toLocaleString("en-IN", { minimumFractionDigits: d, maximumFractionDigits: d });
@@ -27,6 +27,7 @@ const RANGE_OPTIONS = [
 
 function GoldChart({ points }: { points: any[] }) {
   const [range, setRange] = useState("1Y");
+  const [hoverIdx, setHoverIdx] = useState<number | null>(null);
 
   const validPoints = points.filter((p) => p.rate_22k !== null);
   const rangeOption = RANGE_OPTIONS.find((r) => r.label === range);
@@ -99,20 +100,47 @@ function GoldChart({ points }: { points: any[] }) {
 
   const hasBackfillData = filteredPoints.some((p) => p.source === "goldbees_backfill");
 
+  function handleMouseMove(e: ReactMouseEvent<SVGSVGElement>) {
+    const svg = e.currentTarget;
+    const rect = svg.getBoundingClientRect();
+    const scaleX = w / rect.width;
+    const mouseXInViewBox = (e.clientX - rect.left) * scaleX;
+    let nearest = 0;
+    let nearestDist = Infinity;
+    coords.forEach((c, i) => {
+      const dist = Math.abs(c.x - mouseXInViewBox);
+      if (dist < nearestDist) { nearestDist = dist; nearest = i; }
+    });
+    setHoverIdx(nearest);
+  }
+
+  const hovered = hoverIdx !== null ? coords[hoverIdx] : null;
+  const isLongRangeForTooltip = rangeOption?.days === null || (rangeOption?.days ?? 0) > 400;
+  const tooltipDateLabel = hovered
+    ? isLongRangeForTooltip
+      ? new Date(hovered.point.captured_at).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" })
+      : new Date(hovered.point.captured_at).toLocaleString("en-IN", { day: "numeric", month: "short", year: "numeric", hour: "numeric", minute: "2-digit", hour12: true })
+    : "";
+
   return (
     <div>
       <div style={{ display: "flex", alignItems: "baseline", gap: 12, marginBottom: 14 }}>
-        <div style={{ fontFamily: "var(--font-mono)", fontSize: 26, fontWeight: 700 }}>{inr(latest.rate_22k)}<span style={{ fontSize: 13, color: "var(--text-muted)", fontWeight: 400 }}>/g · 22K</span></div>
-        <div style={{ fontSize: 13, fontWeight: 600, color: changePct >= 0 ? "var(--gain)" : "var(--loss)" }}>
-          {sign(changePct)}{Math.abs(changePct).toFixed(2)}% over this period
+        <div style={{ fontFamily: "var(--font-mono)", fontSize: 26, fontWeight: 700 }}>
+          {hovered ? inr(hovered.point.rate_22k) : inr(latest.rate_22k)}
+          <span style={{ fontSize: 13, color: "var(--text-muted)", fontWeight: 400 }}>/g · 22K{hovered && <> · {tooltipDateLabel}</>}</span>
         </div>
+        {!hovered && (
+          <div style={{ fontSize: 13, fontWeight: 600, color: changePct >= 0 ? "var(--gain)" : "var(--loss)" }}>
+            {sign(changePct)}{Math.abs(changePct).toFixed(2)}% over this period
+          </div>
+        )}
       </div>
 
       <div style={{ display: "flex", gap: 6, marginBottom: 16, flexWrap: "wrap" }}>
         {RANGE_OPTIONS.map((r) => (
           <button
             key={r.label}
-            onClick={() => setRange(r.label)}
+            onClick={() => { setRange(r.label); setHoverIdx(null); }}
             style={{
               background: range === r.label ? "var(--purple)" : "transparent",
               color: range === r.label ? "#fff" : "var(--text-muted)",
@@ -126,7 +154,12 @@ function GoldChart({ points }: { points: any[] }) {
         ))}
       </div>
 
-      <svg viewBox={`0 0 ${w} ${h}`} style={{ width: "100%", height: 210 }}>
+      <svg
+        viewBox={`0 0 ${w} ${h}`}
+        style={{ width: "100%", height: 210, cursor: "crosshair" }}
+        onMouseMove={handleMouseMove}
+        onMouseLeave={() => setHoverIdx(null)}
+      >
         <defs>
           <linearGradient id="goldGrad" x1="0" y1="0" x2="0" y2="1">
             <stop offset="0%" stopColor="#F0B94F" stopOpacity="0.35" />
@@ -150,6 +183,13 @@ function GoldChart({ points }: { points: any[] }) {
             </text>
           );
         })}
+
+        {hovered && (
+          <g>
+            <line x1={hovered.x} y1={padTop} x2={hovered.x} y2={padTop + plotH} stroke="var(--text-muted)" strokeWidth="1" strokeDasharray="3,3" />
+            <circle cx={hovered.x} cy={hovered.y} r="5" fill="#fff" stroke="#F0B94F" strokeWidth="2.5" />
+          </g>
+        )}
       </svg>
 
       {hasBackfillData && (
@@ -236,7 +276,11 @@ export default function GoldPage() {
   const totalGainPct = totalInvested > 0 ? (totalGain / totalInvested) * 100 : 0;
   const totalWeight = holdings.reduce((s, h) => s + h.weightGrams, 0);
 
-  const latestRates = history[history.length - 1];
+  // Today's Rate must come from a genuine IBJA-sourced row (has ibja_date
+  // set), never from GOLDBEES backfill data — backfill only populates 22K
+  // and is a converted approximation, not IBJA's actual published rate.
+  const ibjaRows = history.filter((h) => h.ibja_date !== null && h.ibja_date !== undefined);
+  const latestRates = ibjaRows.length > 0 ? ibjaRows[ibjaRows.length - 1] : null;
 
   return (
     <div>
