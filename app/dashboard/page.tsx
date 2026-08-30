@@ -45,6 +45,7 @@ export default function DashboardOverview() {
   const [news, setNews] = useState<any[]>([]);
   const [events, setEvents] = useState<any[]>([]);
   const [mfHoldings, setMfHoldings] = useState<any[]>([]);
+  const [goldHoldings, setGoldHoldings] = useState<any[]>([]);
 
   useEffect(() => {
     fetch("/api/portfolio").then((r) => {
@@ -60,6 +61,7 @@ export default function DashboardOverview() {
         fetch("/api/dividends").then((r) => r.json()).then((d) => setEvents(d.events || []));
       }
       fetch("/api/mutual-funds").then((r) => r.json()).then((d) => setMfHoldings(d.holdings || []));
+      fetch("/api/gold").then((r) => r.json()).then((d) => setGoldHoldings(d.holdings || []));
     });
   }, []);
 
@@ -79,15 +81,19 @@ export default function DashboardOverview() {
 
   const mfTotalCurrent = mfHoldings.reduce((s, h) => s + (h.currentValue ?? 0), 0);
   const mfTotalInvested = mfHoldings.reduce((s, h) => s + (h.invested ?? 0), 0);
-  const mfTotalGain = mfTotalCurrent - mfTotalInvested;
-  const mfTotalGainPct = mfTotalInvested > 0 ? (mfTotalGain / mfTotalInvested) * 100 : 0;
-  const combinedTotal = data.total_current + mfTotalCurrent;
-  const combinedInvested = data.total_invested + mfTotalInvested;
+
+  const goldTotalCurrent = goldHoldings.reduce((s, h) => s + (h.currentValue ?? 0), 0);
+  const goldTotalInvested = goldHoldings.reduce((s, h) => s + (h.amountPaid ?? 0), 0);
+  const goldTotalGain = goldTotalCurrent - goldTotalInvested;
+  const goldTotalGainPct = goldTotalInvested > 0 ? (goldTotalGain / goldTotalInvested) * 100 : 0;
+
+  const combinedTotal = data.total_current + mfTotalCurrent + goldTotalCurrent;
+  const combinedInvested = data.total_invested + mfTotalInvested + goldTotalInvested;
   const combinedGain = combinedTotal - combinedInvested;
   const combinedGainPct = combinedInvested > 0 ? (combinedGain / combinedInvested) * 100 : 0;
 
-  // 1. Estimated dividend income — sum (per-share amount parsed from the
-  // event label) × (units held) across all upcoming dividends.
+  // Estimated dividend income — sum (per-share amount parsed from the event
+  // label) × (units held) across all upcoming dividends.
   const estDividendIncome = events
     .filter((e: any) => e.type === "dividend")
     .reduce((sum: number, e: any) => {
@@ -99,8 +105,6 @@ export default function DashboardOverview() {
     }, 0);
   const dividendCount = events.filter((e: any) => e.type === "dividend").length;
 
-  // 2. Sector performance — weighted overall return % per sector (not
-  // "today", since we don't track reliable per-holding day-level change).
   const sectorPerf: Record<string, { invested: number; pnl: number }> = {};
   data.holdings.forEach((h: any) => {
     const sec = h.sector || "Other";
@@ -112,12 +116,10 @@ export default function DashboardOverview() {
     .map(([sec, v]) => ({ sec, pct: v.invested > 0 ? (v.pnl / v.invested) * 100 : 0 }))
     .sort((a, b) => b.pct - a.pct);
 
-  // 3. Concentration — how much of the portfolio sits in the top 3 holdings.
   const sortedByValue = [...data.holdings].sort((a: any, b: any) => b.current - a.current);
   const top3Value = sortedByValue.slice(0, 3).reduce((s: number, h: any) => s + h.current, 0);
   const top3Pct = data.total_current > 0 ? (top3Value / data.total_current) * 100 : 0;
 
-  // 4. Mutual fund asset mix by category (Equity/Hybrid/Debt, from Groww).
   const mfCategoryTotals: Record<string, number> = {};
   mfHoldings.forEach((h: any) => {
     const cat = h.category || "Other";
@@ -125,7 +127,6 @@ export default function DashboardOverview() {
   });
   const mfCategoryList = Object.entries(mfCategoryTotals).sort((a, b) => b[1] - a[1]);
 
-  // 5. Biggest ₹ impact — largest absolute overall gain/loss, not just %.
   const biggestImpact = [...data.holdings].sort((a: any, b: any) => Math.abs(b.pnl) - Math.abs(a.pnl)).slice(0, 5);
 
   return (
@@ -141,10 +142,11 @@ export default function DashboardOverview() {
         <div style={{ marginTop: 8, fontSize: 13.5, color: data.day_pnl >= 0 ? "#B9F5DC" : "#FBD4CE", fontWeight: 600 }}>
           {sign(data.day_pnl)}{inr(Math.abs(data.day_pnl))} today
         </div>
-        {mfHoldings.length > 0 && (
-          <div style={{ marginTop: 14, display: "flex", gap: 18, fontSize: 12, opacity: 0.9, color: "#fff" }}>
+        {(mfHoldings.length > 0 || goldHoldings.length > 0) && (
+          <div style={{ marginTop: 14, display: "flex", gap: 18, fontSize: 12, opacity: 0.9, color: "#fff", flexWrap: "wrap" }}>
             <span>📈 Stocks: {inr(data.total_current)}</span>
-            <span>🏦 Mutual Funds: {inr(mfTotalCurrent)}</span>
+            {mfHoldings.length > 0 && <span>🏦 Mutual Funds: {inr(mfTotalCurrent)}</span>}
+            {goldHoldings.length > 0 && <span>🪙 Gold: {inr(goldTotalCurrent)}</span>}
           </div>
         )}
       </div>
@@ -156,12 +158,12 @@ export default function DashboardOverview() {
         <div className="stat-card"><div className="stat-label">In Profit</div><div className="stat-value">{inProfitPct.toFixed(0)}%</div><div style={{ fontSize: 11.5, marginTop: 5, color: "var(--text-muted)" }}>of holdings</div></div>
       </div>
 
-      {mfHoldings.length > 0 && (
+      {goldHoldings.length > 0 && (
         <div className="stat-grid" style={{ marginTop: 14 }}>
-          <div className="stat-card"><div className="stat-label">MF Invested</div><div className="stat-value">{inr(mfTotalInvested)}</div><div style={{ fontSize: 11.5, marginTop: 5, color: "var(--text-muted)" }}>{mfHoldings.length} funds</div></div>
-          <div className="stat-card"><div className="stat-label">MF Current Value</div><div className="stat-value">{inr(mfTotalCurrent)}</div><div style={{ fontSize: 11.5, marginTop: 5, color: mfTotalGainPct >= 0 ? "var(--gain)" : "var(--loss)" }}>{sign(mfTotalGainPct)}{Math.abs(mfTotalGainPct).toFixed(1)}%</div></div>
-          <div className="stat-card"><div className="stat-label">MF Gain</div><div className="stat-value" style={{ color: mfTotalGain >= 0 ? "var(--gain)" : "var(--loss)" }}>{sign(mfTotalGain)}{inr(Math.abs(mfTotalGain))}</div></div>
-          <div className="stat-card"><div className="stat-label">Combined Return</div><div className="stat-value" style={{ color: combinedGain >= 0 ? "var(--gain)" : "var(--loss)" }}>{sign(combinedGain)}{inr(Math.abs(combinedGain))}</div><div style={{ fontSize: 11.5, marginTop: 5, color: "var(--text-muted)" }}>{sign(combinedGainPct)}{Math.abs(combinedGainPct).toFixed(1)}% overall</div></div>
+          <div className="stat-card"><div className="stat-label">Gold Invested</div><div className="stat-value">{inr(goldTotalInvested)}</div></div>
+          <div className="stat-card"><div className="stat-label">Gold Current Value</div><div className="stat-value">{inr(goldTotalCurrent)}</div></div>
+          <div className="stat-card"><div className="stat-label">Gold Gain</div><div className="stat-value" style={{ color: goldTotalGain >= 0 ? "var(--gain)" : "var(--loss)" }}>{sign(goldTotalGain)}{inr(Math.abs(goldTotalGain))}</div></div>
+          <div className="stat-card"><div className="stat-label">Gold Return</div><div className="stat-value" style={{ color: goldTotalGainPct >= 0 ? "var(--gain)" : "var(--loss)" }}>{sign(goldTotalGainPct)}{Math.abs(goldTotalGainPct).toFixed(1)}%</div></div>
         </div>
       )}
 
@@ -195,6 +197,21 @@ export default function DashboardOverview() {
               </div>
             );
           })}
+        </div>
+      )}
+
+      {goldHoldings.length > 0 && (
+        <div className="list-card" style={{ marginTop: 18 }}>
+          <div className="list-head">
+            <div className="list-title">Gold Holdings <span style={{ fontSize: 10, background: "var(--gold-soft)", color: "var(--gold)", padding: "2px 7px", borderRadius: 100, marginLeft: 8 }}>via IBJA</span></div>
+            <Link href="/dashboard/gold" className="list-link">View All →</Link>
+          </div>
+          {goldHoldings.slice(0, 5).map((h: any) => (
+            <div key={h.id} style={{ display: "flex", justifyContent: "space-between", padding: "10px 0", borderBottom: "1px solid var(--border)", fontSize: 13 }}>
+              <span style={{ fontWeight: 600 }}>{h.weightGrams}g {h.purity.toUpperCase()}{h.note && <span style={{ fontWeight: 400, color: "var(--text-muted)", fontSize: 11, marginLeft: 6 }}>{h.note}</span>}</span>
+              <span style={{ color: h.pnlPct >= 0 ? "var(--gain)" : "var(--loss)" }}>{sign(h.pnlPct)}{Math.abs(h.pnlPct).toFixed(1)}%</span>
+            </div>
+          ))}
         </div>
       )}
 
