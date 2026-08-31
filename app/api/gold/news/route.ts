@@ -18,15 +18,21 @@ export async function GET() {
     const xml = await res.text();
     const items = xml.match(/<item>[\s\S]*?<\/item>/g) || [];
 
-    const news = items.slice(0, 8).map((block) => {
+    const parsed = items.map((block) => {
       const title = extractTag(block, "title");
       const link = extractTag(block, "link");
       const pubDate = extractTag(block, "pubDate");
       const sourceMatch = block.match(/<source[^>]*>([\s\S]*?)<\/source>/i);
       const source = sourceMatch ? sourceMatch[1].replace(/<!\[CDATA\[/g, "").replace(/\]\]>/g, "").trim() : "Google News";
-      const when = pubDate ? new Date(pubDate).toLocaleDateString("en-IN", { day: "numeric", month: "short" }) : "";
-      return { headline: title, source, when, url: link };
+      const parsedDate = pubDate ? new Date(pubDate) : null;
+      const when = parsedDate ? parsedDate.toLocaleDateString("en-IN", { day: "numeric", month: "short" }) : "";
+      return { headline: title, source, when, url: link, sortTime: parsedDate ? parsedDate.getTime() : 0 };
     });
+
+    // Sort by actual publish date, most recent first — Google News RSS
+    // doesn't guarantee strict chronological order on its own.
+    const sorted = parsed.sort((a, b) => b.sortTime - a.sortTime);
+    const news = sorted.slice(0, 8).map(({ sortTime, ...rest }) => rest);
 
     return NextResponse.json({ news });
   } catch {
