@@ -1,5 +1,12 @@
 import { NextResponse } from "next/server";
 
+// Route handlers cache outgoing fetch() calls by default under Next.js's
+// Data Cache — a separate mechanism from the client-side Router Cache we
+// already fixed in next.config.js. Without these two lines, this route
+// could keep serving the same cached Google News response indefinitely.
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
+
 function extractTag(block: string, tag: string): string {
   const match = block.match(new RegExp(`<${tag}[^>]*>([\\s\\S]*?)<\\/${tag}>`, "i"));
   if (!match) return "";
@@ -11,7 +18,7 @@ export async function GET() {
     const query = encodeURIComponent("gold price India");
     const res = await fetch(
       `https://news.google.com/rss/search?q=${query}&hl=en-IN&gl=IN&ceid=IN:en`,
-      { headers: { "User-Agent": "Mozilla/5.0" } }
+      { headers: { "User-Agent": "Mozilla/5.0" }, cache: "no-store" }
     );
     if (!res.ok) return NextResponse.json({ news: [] });
 
@@ -29,8 +36,6 @@ export async function GET() {
       return { headline: title, source, when, url: link, sortTime: parsedDate ? parsedDate.getTime() : 0 };
     });
 
-    // Sort by actual publish date, most recent first — Google News RSS
-    // doesn't guarantee strict chronological order on its own.
     const sorted = parsed.sort((a, b) => b.sortTime - a.sortTime);
     const news = sorted.slice(0, 8).map(({ sortTime, ...rest }) => rest);
 
