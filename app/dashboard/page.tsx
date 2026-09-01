@@ -92,8 +92,6 @@ export default function DashboardOverview() {
   const combinedGain = combinedTotal - combinedInvested;
   const combinedGainPct = combinedInvested > 0 ? (combinedGain / combinedInvested) * 100 : 0;
 
-  // Estimated dividend income — sum (per-share amount parsed from the event
-  // label) × (units held) across all upcoming dividends.
   const estDividendIncome = events
     .filter((e: any) => e.type === "dividend")
     .reduce((sum: number, e: any) => {
@@ -157,6 +155,15 @@ export default function DashboardOverview() {
         <div className="stat-card"><div className="stat-label">Day Change</div><div className="stat-value">{sign(data.day_pnl)}{inr(Math.abs(data.day_pnl))}</div></div>
         <div className="stat-card"><div className="stat-label">In Profit</div><div className="stat-value">{inProfitPct.toFixed(0)}%</div><div style={{ fontSize: 11.5, marginTop: 5, color: "var(--text-muted)" }}>of holdings</div></div>
       </div>
+
+      {mfHoldings.length > 0 && (
+        <div className="stat-grid" style={{ marginTop: 14 }}>
+          <div className="stat-card"><div className="stat-label">MF Invested</div><div className="stat-value">{inr(mfTotalInvested)}</div><div style={{ fontSize: 11.5, marginTop: 5, color: "var(--text-muted)" }}>{mfHoldings.length} funds</div></div>
+          <div className="stat-card"><div className="stat-label">MF Current Value</div><div className="stat-value">{inr(mfTotalCurrent)}</div><div style={{ fontSize: 11.5, marginTop: 5, color: (mfTotalCurrent - mfTotalInvested) >= 0 ? "var(--gain)" : "var(--loss)" }}>{sign(mfTotalInvested > 0 ? ((mfTotalCurrent - mfTotalInvested) / mfTotalInvested) * 100 : 0)}{Math.abs(mfTotalInvested > 0 ? ((mfTotalCurrent - mfTotalInvested) / mfTotalInvested) * 100 : 0).toFixed(1)}%</div></div>
+          <div className="stat-card"><div className="stat-label">MF Gain</div><div className="stat-value" style={{ color: (mfTotalCurrent - mfTotalInvested) >= 0 ? "var(--gain)" : "var(--loss)" }}>{sign(mfTotalCurrent - mfTotalInvested)}{inr(Math.abs(mfTotalCurrent - mfTotalInvested))}</div></div>
+          <div className="stat-card"><div className="stat-label">Combined Return</div><div className="stat-value" style={{ color: combinedGain >= 0 ? "var(--gain)" : "var(--loss)" }}>{sign(combinedGain)}{inr(Math.abs(combinedGain))}</div><div style={{ fontSize: 11.5, marginTop: 5, color: "var(--text-muted)" }}>{sign(combinedGainPct)}{Math.abs(combinedGainPct).toFixed(1)}% overall</div></div>
+        </div>
+      )}
 
       {goldHoldings.length > 0 && (
         <div className="stat-grid" style={{ marginTop: 14 }}>
