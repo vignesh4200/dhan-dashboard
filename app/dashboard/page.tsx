@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useState } from "react";
+import { useEffect, useState, MouseEvent as ReactMouseEvent } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 
@@ -7,40 +7,228 @@ const inr = (n: number | null | undefined, d = 0) =>
   "₹" + (n ?? 0).toLocaleString("en-IN", { minimumFractionDigits: d, maximumFractionDigits: d });
 const sign = (n: number | null | undefined) => ((n ?? 0) >= 0 ? "+" : "−");
 
-function PerfChart({ points }: { points: { captured_at: string; total_current: number }[] }) {
-  if (points.length < 2) {
-    return <div style={{ color: "var(--text-muted)", fontSize: 13, padding: "30px 0", textAlign: "center" }}>Not enough history yet.</div>;
+const ASSET_TABS = [
+  { key: "all", label: "All" },
+  { key: "stocks", label: "Stocks" },
+  { key: "mf", label: "Mutual Funds" },
+  { key: "gold", label: "Gold" },
+];
+
+const RANGE_OPTIONS = [
+  { label: "1M", days: 30 },
+  { label: "3M", days: 90 },
+  { label: "6M", days: 180 },
+  { label: "1Y", days: 365 },
+  { label: "All", days: null },
+];
+
+function PerfChart() {
+  const [assetType, setAssetType] = useState("all");
+  const [range, setRange] = useState("1M");
+  const [points, setPoints] = useState<{ captured_at: string; current: number; invested: number }[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [hoverIdx, setHoverIdx] = useState<number | null>(null);
+
+  useEffect(() => {
+    setLoading(true);
+    setHoverIdx(null);
+    fetch(`/api/performance?type=${assetType}`)
+      .then((r) => r.json())
+      .then((d) => { setPoints(d.points || []); setLoading(false); });
+  }, [assetType]);
+
+  const rangeOption = RANGE_OPTIONS.find((r) => r.label === range);
+  const filteredPoints = rangeOption?.days
+    ? points.filter((p) => {
+        const cutoff = new Date();
+        cutoff.setDate(cutoff.getDate() - rangeOption.days!);
+        return new Date(p.captured_at) >= cutoff;
+      })
+    : points;
+
+  const tabs = (
+    <div style={{ display: "flex", gap: 6, marginBottom: 18, flexWrap: "wrap" }}>
+      {ASSET_TABS.map((t) => (
+        <button
+          key={t.key}
+          onClick={() => setAssetType(t.key)}
+          style={{
+            background: assetType === t.key ? "var(--purple)" : "transparent",
+            color: assetType === t.key ? "#fff" : "var(--text-muted)",
+            border: assetType === t.key ? "none" : "1px solid var(--border)",
+            borderRadius: 8, padding: "6px 14px", fontSize: 12,
+            fontWeight: assetType === t.key ? 600 : 400, cursor: "pointer",
+          }}
+        >
+          {t.label}
+        </button>
+      ))}
+    </div>
+  );
+
+  if (loading) {
+    return <div>{tabs}<div style={{ color: "var(--text-muted)", fontSize: 13, padding: "30px 0", textAlign: "center" }}>Loading…</div></div>;
   }
-  const w = 900, h = 160, pad = 10;
-  const values = points.map((p) => p.total_current);
-  const min = Math.min(...values), max = Math.max(...values);
-  const range = max - min || 1;
-  const stepX = (w - pad * 2) / (points.length - 1);
-  const coords = points.map((p, i) => {
-    const x = pad + i * stepX;
-    const y = pad + (h - pad * 2) * (1 - (p.total_current - min) / range);
-    return `${x},${y}`;
-  });
-  const linePath = "M" + coords.join(" L");
-  const areaPath = linePath + ` L${pad + (points.length - 1) * stepX},${h - pad} L${pad},${h - pad} Z`;
+
+  if (filteredPoints.length < 2) {
+    return (
+      <div>
+        {tabs}
+        <div style={{ color: "var(--text-muted)", fontSize: 13, padding: "30px 0", textAlign: "center" }}>
+          Not enough history yet for this view — it builds up over time as snapshots accumulate.
+        </div>
+      </div>
+    );
+  }
+
+  const w = 900, h = 210, padTop = 16, padBottom = 36, padLeft = 8, padRight = 8;
+  const allValues = filteredPoints.flatMap((p) => [p.current, p.invested]);
+  const min = Math.min(...allValues), max = Math.max(...allValues);
+  const rangeSpan = max - min || 1;
+  const plotW = w - padLeft - padRight;
+  const plotH = h - padTop - padBottom;
+  const stepX = plotW / (filteredPoints.length - 1);
+
+  const currentCoords = filteredPoints.map((p, i) => ({
+    x: padLeft + i * stepX,
+    y: padTop + plotH * (1 - (p.current - min) / rangeSpan),
+    point: p,
+  }));
+  const investedCoords = filteredPoints.map((p, i) => ({
+    x: padLeft + i * stepX,
+    y: padTop + plotH * (1 - (p.invested - min) / rangeSpan),
+  }));
+
+  const currentPath = "M" + currentCoords.map((c) => `${c.x},${c.y}`).join(" L");
+  const areaPath = currentPath + ` L${currentCoords[currentCoords.length - 1].x},${padTop + plotH} L${currentCoords[0].x},${padTop + plotH} Z`;
+  const investedPath = "M" + investedCoords.map((c) => `${c.x},${c.y}`).join(" L");
+
+  const latest = filteredPoints[filteredPoints.length - 1];
+  const first = filteredPoints[0];
+  const gain = latest.current - latest.invested;
+  const gainPct = latest.invested > 0 ? (gain / latest.invested) * 100 : 0;
+  const changePct = first.current > 0 ? ((latest.current - first.current) / first.current) * 100 : 0;
+
+  const labelCount = Math.min(5, currentCoords.length);
+  const labelIndices = Array.from({ length: labelCount }, (_, i) =>
+    Math.round((i * (currentCoords.length - 1)) / (labelCount - 1))
+  );
+  const usesLongRange = rangeOption?.days === null || (rangeOption?.days ?? 0) > 200;
+  const formatLabel = (iso: string) =>
+    usesLongRange
+      ? new Date(iso).toLocaleDateString("en-IN", { day: "numeric", month: "short" })
+      : new Date(iso).toLocaleString("en-IN", { day: "numeric", month: "short", hour: "numeric", minute: "2-digit", hour12: true });
+
+  function handleMouseMove(e: ReactMouseEvent<SVGSVGElement>) {
+    const rect = e.currentTarget.getBoundingClientRect();
+    const scaleX = w / rect.width;
+    const mouseX = (e.clientX - rect.left) * scaleX;
+    let nearest = 0, nearestDist = Infinity;
+    currentCoords.forEach((c, i) => {
+      const dist = Math.abs(c.x - mouseX);
+      if (dist < nearestDist) { nearestDist = dist; nearest = i; }
+    });
+    setHoverIdx(nearest);
+  }
+
+  const hovered = hoverIdx !== null ? filteredPoints[hoverIdx] : null;
+  const displayPoint = hovered || latest;
+  const displayGain = displayPoint.current - displayPoint.invested;
+  const displayGainPct = displayPoint.invested > 0 ? (displayGain / displayPoint.invested) * 100 : 0;
+
   return (
-    <svg viewBox={`0 0 ${w} ${h}`} style={{ width: "100%", height: 160 }}>
-      <defs>
-        <linearGradient id="pg" x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0%" stopColor="#6B5CE6" stopOpacity="0.35" />
-          <stop offset="100%" stopColor="#6B5CE6" stopOpacity="0" />
-        </linearGradient>
-      </defs>
-      <path d={areaPath} fill="url(#pg)" />
-      <path d={linePath} fill="none" stroke="#6B5CE6" strokeWidth="2.5" />
-    </svg>
+    <div>
+      {tabs}
+
+      <div style={{ display: "flex", gap: 40, marginBottom: 16, flexWrap: "wrap" }}>
+        <div>
+          <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 11.5, color: "var(--text-muted)", marginBottom: 4 }}>
+            <span style={{ width: 10, height: 10, borderRadius: 3, background: "var(--purple)", display: "inline-block" }} />Current
+          </div>
+          <div style={{ fontFamily: "var(--font-mono)", fontSize: 22, fontWeight: 700 }}>{inr(displayPoint.current)}</div>
+        </div>
+        <div>
+          <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 11.5, color: "var(--text-muted)", marginBottom: 4 }}>
+            <span style={{ width: 10, height: 2, background: "var(--text-muted)", display: "inline-block" }} />Invested
+          </div>
+          <div style={{ fontFamily: "var(--font-mono)", fontSize: 22, fontWeight: 700, color: "var(--text-muted)" }}>{inr(displayPoint.invested)}</div>
+        </div>
+        <div>
+          <div style={{ fontSize: 11.5, color: "var(--text-muted)", marginBottom: 4 }}>Gain</div>
+          <div style={{ fontFamily: "var(--font-mono)", fontSize: 22, fontWeight: 700, color: displayGain >= 0 ? "var(--gain)" : "var(--loss)" }}>
+            {sign(displayGain)}{inr(Math.abs(displayGain))} <span style={{ fontSize: 13 }}>({sign(displayGainPct)}{Math.abs(displayGainPct).toFixed(1)}%)</span>
+          </div>
+        </div>
+      </div>
+
+      <div style={{ display: "flex", gap: 6, marginBottom: 16, flexWrap: "wrap" }}>
+        {RANGE_OPTIONS.map((r) => (
+          <button
+            key={r.label}
+            onClick={() => { setRange(r.label); setHoverIdx(null); }}
+            style={{
+              background: range === r.label ? "var(--purple)" : "transparent",
+              color: range === r.label ? "#fff" : "var(--text-muted)",
+              border: range === r.label ? "none" : "1px solid var(--border)",
+              borderRadius: 8, padding: "5px 12px", fontSize: 11.5,
+              fontWeight: range === r.label ? 600 : 400, cursor: "pointer",
+            }}
+          >
+            {r.label}
+          </button>
+        ))}
+      </div>
+
+      <svg
+        viewBox={`0 0 ${w} ${h}`}
+        style={{ width: "100%", height: 210, cursor: "crosshair" }}
+        onMouseMove={handleMouseMove}
+        onMouseLeave={() => setHoverIdx(null)}
+      >
+        <defs>
+          <linearGradient id="pg" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stopColor="#6B5CE6" stopOpacity="0.35" />
+            <stop offset="100%" stopColor="#6B5CE6" stopOpacity="0" />
+          </linearGradient>
+        </defs>
+
+        <text x={padLeft} y={padTop + 6} fontSize="13" fontWeight="600" fill="var(--text)">{inr(max)}</text>
+        <text x={padLeft} y={padTop + plotH - 2} fontSize="13" fontWeight="600" fill="var(--text)">{inr(min)}</text>
+
+        <path d={investedPath} fill="none" stroke="var(--text-muted)" strokeWidth="1.75" strokeDasharray="5,4" />
+        <path d={areaPath} fill="url(#pg)" />
+        <path d={currentPath} fill="none" stroke="#6B5CE6" strokeWidth="2.5" />
+        <circle cx={currentCoords[currentCoords.length - 1].x} cy={currentCoords[currentCoords.length - 1].y} r="4" fill="#6B5CE6" />
+
+        {labelIndices.map((idx, i) => {
+          const c = currentCoords[idx];
+          const anchor = i === 0 ? "start" : i === labelIndices.length - 1 ? "end" : "middle";
+          return (
+            <text key={i} x={c.x} y={h - 8} fontSize="10.5" fontWeight="500" fill="var(--text-muted)" textAnchor={anchor}>
+              {formatLabel(c.point.captured_at)}
+            </text>
+          );
+        })}
+
+        {hoverIdx !== null && (
+          <g>
+            <line x1={currentCoords[hoverIdx].x} y1={padTop} x2={currentCoords[hoverIdx].x} y2={padTop + plotH} stroke="var(--text-muted)" strokeWidth="1" strokeDasharray="3,3" />
+            <circle cx={currentCoords[hoverIdx].x} cy={currentCoords[hoverIdx].y} r="5" fill="#fff" stroke="#6B5CE6" strokeWidth="2.5" />
+            <circle cx={investedCoords[hoverIdx].x} cy={investedCoords[hoverIdx].y} r="4" fill="var(--text-muted)" />
+          </g>
+        )}
+      </svg>
+
+      <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 10, lineHeight: 1.5 }}>
+        Hover the chart to see Current, Invested, and Gain for any specific date. "{ASSET_TABS.find((t) => t.key === assetType)?.label}" view{assetType !== "stocks" ? " builds up from when combined tracking started" : " uses your full stock history"}.
+      </div>
+    </div>
   );
 }
 
 export default function DashboardOverview() {
   const router = useRouter();
   const [data, setData] = useState<any>(null);
-  const [perf, setPerf] = useState<any[]>([]);
   const [movers, setMovers] = useState<any[]>([]);
   const [news, setNews] = useState<any[]>([]);
   const [events, setEvents] = useState<any[]>([]);
@@ -55,7 +243,6 @@ export default function DashboardOverview() {
       if (!snap) return;
       setData(snap);
       if (!snap.empty) {
-        fetch("/api/performance").then((r) => r.json()).then((d) => setPerf(d.points || []));
         fetch("/api/movers").then((r) => r.json()).then((d) => setMovers(d.movers || []));
         fetch("/api/news").then((r) => r.json()).then((d) => setNews(d.news || []));
         fetch("/api/dividends").then((r) => r.json()).then((d) => setEvents(d.events || []));
@@ -176,7 +363,7 @@ export default function DashboardOverview() {
 
       <div className="list-card" style={{ marginTop: 18 }}>
         <div className="list-head"><div className="list-title">Portfolio Performance</div></div>
-        <PerfChart points={perf} />
+        <PerfChart />
       </div>
 
       <div className="list-card" style={{ marginTop: 18 }}>
