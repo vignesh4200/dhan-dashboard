@@ -22,6 +22,27 @@ const RANGE_OPTIONS = [
   { label: "All", days: null },
 ];
 
+// Converts straight-line points into a smooth curved path (Catmull-Rom
+// style cubic bezier), so the chart reads as a polished curve rather than
+// jagged straight segments between data points.
+function smoothPath(coords: { x: number; y: number }[]): string {
+  if (coords.length < 2) return "";
+  if (coords.length === 2) return `M ${coords[0].x},${coords[0].y} L ${coords[1].x},${coords[1].y}`;
+  let path = `M ${coords[0].x},${coords[0].y}`;
+  for (let i = 0; i < coords.length - 1; i++) {
+    const p0 = coords[i === 0 ? i : i - 1];
+    const p1 = coords[i];
+    const p2 = coords[i + 1];
+    const p3 = coords[i + 2 < coords.length ? i + 2 : i + 1];
+    const cp1x = p1.x + (p2.x - p0.x) / 6;
+    const cp1y = p1.y + (p2.y - p0.y) / 6;
+    const cp2x = p2.x - (p3.x - p1.x) / 6;
+    const cp2y = p2.y - (p3.y - p1.y) / 6;
+    path += ` C ${cp1x},${cp1y} ${cp2x},${cp2y} ${p2.x},${p2.y}`;
+  }
+  return path;
+}
+
 function PerfChart() {
   const [assetType, setAssetType] = useState("all");
   const [range, setRange] = useState("1M");
@@ -99,9 +120,9 @@ function PerfChart() {
     y: padTop + plotH * (1 - (p.invested - min) / rangeSpan),
   }));
 
-  const currentPath = "M" + currentCoords.map((c) => `${c.x},${c.y}`).join(" L");
+  const currentPath = smoothPath(currentCoords);
   const areaPath = currentPath + ` L${currentCoords[currentCoords.length - 1].x},${padTop + plotH} L${currentCoords[0].x},${padTop + plotH} Z`;
-  const investedPath = "M" + investedCoords.map((c) => `${c.x},${c.y}`).join(" L");
+  const investedPath = smoothPath(investedCoords);
 
   const latest = filteredPoints[filteredPoints.length - 1];
   const first = filteredPoints[0];
@@ -187,18 +208,36 @@ function PerfChart() {
       >
         <defs>
           <linearGradient id="pg" x1="0" y1="0" x2="0" y2="1">
-            <stop offset="0%" stopColor="#6B5CE6" stopOpacity="0.35" />
+            <stop offset="0%" stopColor="#9C8FFF" stopOpacity="0.40" />
+            <stop offset="55%" stopColor="#6B5CE6" stopOpacity="0.10" />
             <stop offset="100%" stopColor="#6B5CE6" stopOpacity="0" />
           </linearGradient>
+          <linearGradient id="lineGrad" x1="0" y1="0" x2="1" y2="0">
+            <stop offset="0%" stopColor="#8177E8" />
+            <stop offset="100%" stopColor="#B0A6FF" />
+          </linearGradient>
+          <filter id="chartGlow" x="-50%" y="-50%" width="200%" height="200%">
+            <feGaussianBlur stdDeviation="4" result="blur" />
+            <feMerge>
+              <feMergeNode in="blur" />
+              <feMergeNode in="SourceGraphic" />
+            </feMerge>
+          </filter>
         </defs>
+
+        <line x1={padLeft} y1={padTop + plotH * 0.25} x2={w - padRight} y2={padTop + plotH * 0.25} stroke="var(--border)" strokeWidth="1" />
+        <line x1={padLeft} y1={padTop + plotH * 0.5} x2={w - padRight} y2={padTop + plotH * 0.5} stroke="var(--border)" strokeWidth="1" />
+        <line x1={padLeft} y1={padTop + plotH * 0.75} x2={w - padRight} y2={padTop + plotH * 0.75} stroke="var(--border)" strokeWidth="1" />
 
         <text x={padLeft} y={padTop + 6} fontSize="13" fontWeight="600" fill="var(--text)">{inr(max)}</text>
         <text x={padLeft} y={padTop + plotH - 2} fontSize="13" fontWeight="600" fill="var(--text)">{inr(min)}</text>
 
-        <path d={investedPath} fill="none" stroke="var(--text-muted)" strokeWidth="1.75" strokeDasharray="5,4" />
+        <path d={investedPath} fill="none" stroke="var(--text-muted)" strokeWidth="1.75" strokeLinecap="round" />
         <path d={areaPath} fill="url(#pg)" />
-        <path d={currentPath} fill="none" stroke="#6B5CE6" strokeWidth="2.5" />
-        <circle cx={currentCoords[currentCoords.length - 1].x} cy={currentCoords[currentCoords.length - 1].y} r="4" fill="#6B5CE6" />
+        <path d={currentPath} fill="none" stroke="url(#lineGrad)" strokeWidth="3" strokeLinecap="round" filter="url(#chartGlow)" />
+
+        <circle cx={currentCoords[currentCoords.length - 1].x} cy={currentCoords[currentCoords.length - 1].y} r="8" fill="#B0A6FF" opacity="0.25" />
+        <circle cx={currentCoords[currentCoords.length - 1].x} cy={currentCoords[currentCoords.length - 1].y} r="4.5" fill="#fff" stroke="#8177E8" strokeWidth="2.5" />
 
         {labelIndices.map((idx, i) => {
           const c = currentCoords[idx];
@@ -210,13 +249,27 @@ function PerfChart() {
           );
         })}
 
-        {hoverIdx !== null && (
-          <g>
-            <line x1={currentCoords[hoverIdx].x} y1={padTop} x2={currentCoords[hoverIdx].x} y2={padTop + plotH} stroke="var(--text-muted)" strokeWidth="1" strokeDasharray="3,3" />
-            <circle cx={currentCoords[hoverIdx].x} cy={currentCoords[hoverIdx].y} r="5" fill="#fff" stroke="#6B5CE6" strokeWidth="2.5" />
-            <circle cx={investedCoords[hoverIdx].x} cy={investedCoords[hoverIdx].y} r="4" fill="var(--text-muted)" />
-          </g>
-        )}
+        {hoverIdx !== null && (() => {
+          const hp = filteredPoints[hoverIdx];
+          const hGain = hp.current - hp.invested;
+          const hGainPct = hp.invested > 0 ? (hGain / hp.invested) * 100 : 0;
+          const boxX = currentCoords[hoverIdx].x > w / 2 ? currentCoords[hoverIdx].x - 210 : currentCoords[hoverIdx].x + 10;
+          return (
+            <g>
+              <line x1={currentCoords[hoverIdx].x} y1={padTop} x2={currentCoords[hoverIdx].x} y2={padTop + plotH} stroke="var(--text-muted)" strokeWidth="1" strokeDasharray="3,3" />
+              <circle cx={currentCoords[hoverIdx].x} cy={currentCoords[hoverIdx].y} r="5" fill="#fff" stroke="#8177E8" strokeWidth="2.5" />
+              <circle cx={investedCoords[hoverIdx].x} cy={investedCoords[hoverIdx].y} r="4" fill="var(--text-muted)" />
+              <rect x={boxX} y={padTop + 4} width="200" height="52" rx="8" fill="var(--bg)" stroke="var(--border)" strokeWidth="1" />
+              <text x={boxX + 12} y={padTop + 22} fontSize="10" fill="var(--text-muted)">{formatLabel(hp.captured_at)}</text>
+              <text x={boxX + 12} y={padTop + 38} fontSize="11" fontWeight="600" fill="var(--text)">
+                {inr(hp.current)} <tspan fill="var(--text-muted)" fontWeight="400">/ {inr(hp.invested)}</tspan>
+              </text>
+              <text x={boxX + 12} y={padTop + 51} fontSize="10.5" fontWeight="600" fill={hGain >= 0 ? "var(--gain)" : "var(--loss)"}>
+                {sign(hGain)}{inr(Math.abs(hGain))} ({sign(hGainPct)}{Math.abs(hGainPct).toFixed(1)}%)
+              </text>
+            </g>
+          );
+        })()}
       </svg>
 
       <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 10, lineHeight: 1.5 }}>
@@ -279,6 +332,8 @@ export default function DashboardOverview() {
   const combinedGain = combinedTotal - combinedInvested;
   const combinedGainPct = combinedInvested > 0 ? (combinedGain / combinedInvested) * 100 : 0;
 
+  // Estimated dividend income — sum (per-share amount parsed from the event
+  // label) × (units held) across all upcoming dividends.
   const estDividendIncome = events
     .filter((e: any) => e.type === "dividend")
     .reduce((sum: number, e: any) => {
