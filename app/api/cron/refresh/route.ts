@@ -35,8 +35,8 @@ export async function GET(req: NextRequest) {
       const pin = decryptSecret(creds.dhan_pin_encrypted);
       const totpSecret = decryptSecret(creds.totp_secret_encrypted);
       const code = generateTotpCode(totpSecret);
-      const minted = await generateAccessTokenViaTotp(creds.dhan_client_id, pin, code);
 
+      const minted = await generateAccessTokenViaTotp(creds.dhan_client_id, pin, code);
       if ("error" in minted) {
         results.push({ user: user.id, ok: false, reason: "TOTP token generation failed: " + minted.error });
         continue;
@@ -71,9 +71,15 @@ export async function GET(req: NextRequest) {
         .order("captured_at", { ascending: false })
         .limit(1)
         .single();
+
       const dayPnl = prevSnap ? totalCurrent - prevSnap.total_current : 0;
 
-      await supabaseAdmin.from("portfolio_snapshots").insert({
+      // IMPORTANT: this insert's result was previously never checked, so a
+      // silent failure here (RLS, schema mismatch, payload size, etc.)
+      // would report the whole cron run as successful while genuinely
+      // writing nothing new — confirmed as the cause of the Portfolio
+      // Performance chart appearing frozen at an old date.
+      const { error: snapInsertError } = await supabaseAdmin.from("portfolio_snapshots").insert({
         user_id: user.id,
         holdings: computed,
         total_invested: totalInvested,
@@ -81,6 +87,11 @@ export async function GET(req: NextRequest) {
         total_pnl: totalPnl,
         day_pnl: dayPnl,
       });
+
+      if (snapInsertError) {
+        results.push({ user: user.id, ok: false, reason: "Snapshot insert failed: " + snapInsertError.message });
+        continue;
+      }
 
       const whatsappReady = isWhatsAppConfigured();
       const toNumber = user.whatsapp_number || user.phone;
@@ -99,6 +110,7 @@ export async function GET(req: NextRequest) {
             .eq("tier", tier)
             .eq("alert_date", new Date().toISOString().slice(0, 10))
             .maybeSingle();
+
           if (already) continue;
 
           await sendWhatsAppAlert({
@@ -114,6 +126,7 @@ export async function GET(req: NextRequest) {
             tier,
             pnl_pct: h.pnlPct,
           });
+
           alertsSent++;
         }
       }
