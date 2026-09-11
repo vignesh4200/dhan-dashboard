@@ -56,10 +56,12 @@ export async function GET(req: NextRequest) {
 
       let logged = 0;
       let skipped = 0;
+      let firstDiag: any = null;
 
       for (const isin of isins) {
         const symbol = isinMap[isin];
-        const dividends = await getHistoricalDividendsForSymbol(symbol);
+        const { dividends, diag } = await getHistoricalDividendsForSymbol(symbol);
+        if (!firstDiag) firstDiag = { symbol, ...diag };
 
         for (const div of dividends) {
           if (!div.perShareAmount) { skipped++; continue; }
@@ -87,7 +89,7 @@ export async function GET(req: NextRequest) {
         }
       }
 
-      results.push({ user: user.id, ok: true, symbolsChecked: isins.length, logged, skipped });
+      results.push({ user: user.id, ok: true, symbolsChecked: isins.length, logged, skipped, firstSymbolDiag: firstDiag });
     } catch (e: any) {
       results.push({ user: user.id, ok: false, error: e.message });
     }
