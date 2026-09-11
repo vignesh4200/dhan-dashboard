@@ -22,9 +22,6 @@ const RANGE_OPTIONS = [
   { label: "All", days: null },
 ];
 
-// Converts straight-line points into a smooth curved path (Catmull-Rom
-// style cubic bezier), so the chart reads as a polished curve rather than
-// jagged straight segments between data points.
 function smoothPath(coords: { x: number; y: number }[]): string {
   if (coords.length < 2) return "";
   if (coords.length === 2) return `M ${coords[0].x},${coords[0].y} L ${coords[1].x},${coords[1].y}`;
@@ -333,13 +330,13 @@ export default function DashboardOverview() {
   const combinedGainPct = combinedInvested > 0 ? (combinedGain / combinedInvested) * 100 : 0;
 
   // Estimated dividend income — sum (per-share amount parsed from the event
-  // label) × (units held) across all upcoming dividends.
+  // label, matching "Rs" or "Re") × (units held) across all upcoming dividends.
   const estDividendIncome = events
     .filter((e: any) => e.type === "dividend")
     .reduce((sum: number, e: any) => {
       const holding = data.holdings.find((h: any) => h.symbol === e.symbol);
       if (!holding) return sum;
-      const amountMatch = (e.label || "").match(/Rs\.?\s*([\d.]+)/i);
+      const amountMatch = (e.label || "").match(/R[se]\.?\s*([\d.]+)/i);
       const perShare = amountMatch ? parseFloat(amountMatch[1]) : 0;
       return sum + perShare * holding.qty;
     }, 0);
@@ -539,17 +536,33 @@ export default function DashboardOverview() {
       <div className="list-card" style={{ marginTop: 18, marginBottom: 40 }}>
         <div className="list-head"><div className="list-title">Dividends &amp; Earnings</div></div>
         {events.length === 0 ? <div style={{ color: "var(--text-muted)", fontSize: 12.5 }}>No upcoming events found.</div> :
-          events.map((e, i) => (
-            <div key={i} style={{ display: "flex", justifyContent: "space-between", padding: "10px 0", borderBottom: "1px solid var(--border)", fontSize: 12.5 }}>
-              <span>
-                <span style={{ fontSize: 9.5, fontWeight: 700, padding: "2px 7px", borderRadius: 100, marginRight: 8, background: e.type === "dividend" ? "var(--gold-soft)" : "var(--amber-soft)", color: e.type === "dividend" ? "var(--gold)" : "var(--amber)" }}>
-                  {e.type.toUpperCase()}
+          events.map((e, i) => {
+            let dividendAmount: number | null = null;
+            if (e.type === "dividend") {
+              const holding = data.holdings.find((h: any) => h.symbol === e.symbol);
+              // Matches "Rs" or "Re" (singular rupee, e.g. "Re 1 Per Share")
+              const amountMatch = (e.label || "").match(/R[se]\.?\s*([\d.]+)/i);
+              if (holding && amountMatch) {
+                dividendAmount = parseFloat(amountMatch[1]) * holding.qty;
+              }
+            }
+            return (
+              <div key={i} style={{ display: "flex", justifyContent: "space-between", padding: "10px 0", borderBottom: "1px solid var(--border)", fontSize: 12.5 }}>
+                <span>
+                  <span style={{ fontSize: 9.5, fontWeight: 700, padding: "2px 7px", borderRadius: 100, marginRight: 8, background: e.type === "dividend" ? "var(--gold-soft)" : "var(--amber-soft)", color: e.type === "dividend" ? "var(--gold)" : "var(--amber)" }}>
+                    {e.type.toUpperCase()}
+                  </span>
+                  {e.symbol} — {e.label}
                 </span>
-                {e.symbol} — {e.label}
-              </span>
-              <span style={{ color: "var(--text-muted)" }}>{e.date}</span>
-            </div>
-          ))}
+                <span style={{ textAlign: "right" }}>
+                  {dividendAmount !== null && (
+                    <div style={{ color: "var(--gain)", fontWeight: 600, fontSize: 12.5 }}>{inr(dividendAmount)}</div>
+                  )}
+                  <div style={{ color: "var(--text-muted)", fontSize: dividendAmount !== null ? 10.5 : 12.5 }}>{e.date}</div>
+                </span>
+              </div>
+            );
+          })}
       </div>
     </div>
   );
