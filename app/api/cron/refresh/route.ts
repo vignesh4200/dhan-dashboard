@@ -15,6 +15,11 @@ import { sendWhatsAppAlert, isWhatsAppConfigured } from "@/lib/whatsapp";
 // never has a chance to expire. Also fetches each holding's real sector via
 // Yahoo's assetProfile module and stores it on the snapshot, so the sidebar
 // doesn't need a separate slow live fetch on every page load.
+//
+// ISIN is now also passed through onto each stored holding (confirmed
+// Sept 2026: it was missing before, which silently broke the dividend
+// reconstruction cron's ISIN-to-symbol mapping — every run reported "No
+// ISINs on holdings yet" since there was nothing to map from).
 export async function GET(req: NextRequest) {
   const secret = req.nextUrl.searchParams.get("secret");
   if (secret !== process.env.CRON_SECRET) {
@@ -58,6 +63,7 @@ export async function GET(req: NextRequest) {
       const computed = rawHoldings.map((h) => ({
         ...computeHolding(h.tradingSymbol, h.totalQty, h.avgCostPrice, ltpMap[h.tradingSymbol] ?? h.avgCostPrice),
         sector: sectorMap[h.tradingSymbol] || "Other",
+        isin: h.isin,
       }));
 
       const totalInvested = computed.reduce((s, h) => s + h.invested, 0);
@@ -74,11 +80,6 @@ export async function GET(req: NextRequest) {
 
       const dayPnl = prevSnap ? totalCurrent - prevSnap.total_current : 0;
 
-      // IMPORTANT: this insert's result was previously never checked, so a
-      // silent failure here (RLS, schema mismatch, payload size, etc.)
-      // would report the whole cron run as successful while genuinely
-      // writing nothing new — confirmed as the cause of the Portfolio
-      // Performance chart appearing frozen at an old date.
       const { error: snapInsertError } = await supabaseAdmin.from("portfolio_snapshots").insert({
         user_id: user.id,
         holdings: computed,
