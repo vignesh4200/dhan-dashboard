@@ -15,10 +15,9 @@ export async function getDhanLedger(accessToken: string, fromDate: string, toDat
   return res.json();
 }
 
-// Dhan's dated Trade History API — supposedly returns full historical
-// trades for a date range (unlike the plain /v2/trades/ endpoint, which
-// only returns today's trades). Paginated — page starts at 0. Untested
-// against the real account at time of writing; this is a diagnostic call.
+// Dhan's dated Trade History API — a single page. ~20 trades per page,
+// sorted newest-first. Use getAllDhanTrades below for the full history —
+// this is the low-level single-page fetch it builds on.
 export async function getDhanTradeHistory(accessToken: string, fromDate: string, toDate: string, page: number = 0) {
   const res = await fetch(
     `https://api.dhan.co/v2/trades/${fromDate}/${toDate}/${page}`,
@@ -29,4 +28,27 @@ export async function getDhanTradeHistory(accessToken: string, fromDate: string,
     throw new Error(`Dhan trade history fetch failed: ${res.status} ${text}`);
   }
   return res.json();
+}
+
+// Confirmed (Sept 2026) via direct testing: page=0 alone stops at a recent
+// date, but page=1 reveals genuinely older trades — this is pagination,
+// not a hard API ceiling. This helper loops through every page until
+// exhausted, returning the complete trade history for the given date
+// range so past holdings can be reconstructed accurately.
+export async function getAllDhanTrades(accessToken: string, fromDate: string, toDate: string) {
+  const all: any[] = [];
+  let page = 0;
+  const maxPages = 200; // safety cap against an infinite loop, not a real limit
+
+  while (page < maxPages) {
+    const batch = await getDhanTradeHistory(accessToken, fromDate, toDate, page);
+    const batchArray = Array.isArray(batch) ? batch : [];
+    if (batchArray.length === 0) break;
+    all.push(...batchArray);
+    page++;
+    // A page smaller than the standard size means it was the last one.
+    if (batchArray.length < 20) break;
+  }
+
+  return all;
 }
