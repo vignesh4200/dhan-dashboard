@@ -27,14 +27,40 @@ function parseNseDate(raw: string): Date | null {
   return new Date(parseInt(year), month, parseInt(day));
 }
 
-export async function getHistoricalDividendsForSymbol(symbol: string): Promise<HistoricalDividend[]> {
+export type HistoricalDivDiagnostics = {
+  fetchOk: boolean;
+  httpStatus: number | null;
+  rawItemCount: number;
+  sampleRawItem: any;
+  error: string | null;
+};
+
+export async function getHistoricalDividendsForSymbol(
+  symbol: string
+): Promise<{ dividends: HistoricalDividend[]; diag: HistoricalDivDiagnostics }> {
+  const diag: HistoricalDivDiagnostics = {
+    fetchOk: false, httpStatus: null, rawItemCount: 0, sampleRawItem: null, error: null,
+  };
+
   try {
     const res = await fetchNseAuthed(
       `https://www.nseindia.com/api/corporates-corporateActions?index=equities&symbol=${encodeURIComponent(symbol)}`
     );
-    if (!res || !res.ok) return [];
+    if (!res) {
+      diag.error = "fetchNseAuthed returned null (session/cookie setup likely failed)";
+      return { dividends: [], diag };
+    }
+    diag.httpStatus = res.status;
+    if (!res.ok) {
+      diag.error = `HTTP ${res.status}`;
+      return { dividends: [], diag };
+    }
+
     const data = await res.json();
     const list: any[] = Array.isArray(data) ? data : data?.data || [];
+    diag.fetchOk = true;
+    diag.rawItemCount = list.length;
+    diag.sampleRawItem = list[0] || null;
 
     const results: HistoricalDividend[] = [];
     for (const item of list) {
@@ -54,8 +80,9 @@ export async function getHistoricalDividendsForSymbol(symbol: string): Promise<H
         rawLabel: item.subject || "",
       });
     }
-    return results;
-  } catch {
-    return [];
+    return { dividends: results, diag };
+  } catch (e: any) {
+    diag.error = e?.message || "fetch threw";
+    return { dividends: [], diag };
   }
 }
