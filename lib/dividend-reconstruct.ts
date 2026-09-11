@@ -32,10 +32,16 @@ export function shareCountAsOf(trades: DhanTrade[], isin: string, asOfDate: stri
 // against NSE's dividend data (which is keyed by trading symbol). Only
 // covers symbols still currently held — a fully-exited historical
 // position won't resolve through this map.
-export function buildIsinSymbolMap(holdings: { tradingSymbol: string; isin?: string }[]): Record<string, string> {
+//
+// IMPORTANT: stored holdings (from computeHolding(), as saved in
+// portfolio_snapshots) use the field name "symbol", not "tradingSymbol" —
+// confirmed Sept 2026: using the wrong field name here silently mapped
+// every ISIN to undefined, causing every single NSE lookup to query for
+// "symbol=undefined" and correctly return nothing.
+export function buildIsinSymbolMap(holdings: { symbol: string; isin?: string }[]): Record<string, string> {
   const map: Record<string, string> = {};
   for (const h of holdings) {
-    if (h.isin) map[h.isin] = h.tradingSymbol;
+    if (h.isin) map[h.isin] = h.symbol;
   }
   return map;
 }
