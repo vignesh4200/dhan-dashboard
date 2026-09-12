@@ -31,6 +31,8 @@ export async function POST(req: NextRequest) {
   }
 
   let inserted = 0;
+  let alreadyExists = 0;
+  let firstError: string | null = null;
   let unresolvedNames: string[] = [];
 
   for (const row of rows) {
@@ -39,27 +41,47 @@ export async function POST(req: NextRequest) {
       unresolvedNames.push(row.scripName);
     }
 
-    const { error } = await supabaseAdmin.from("dividend_received").upsert(
-      {
-        user_id: user.id,
-        symbol: resolvedSymbol,
-        amount: row.amount,
-        per_share_amount: row.perShare,
-        quantity_at_record_date: row.quantity,
-        record_date: row.date,
-        source: "dhan_report",
-        note: `From Dhan report (as "${row.scripName}")`,
-      },
-      { onConflict: "user_id,symbol,record_date,amount", ignoreDuplicates: true }
-    );
+    // Manual dedup check instead of upsert+onConflict — sidesteps any
+    // issue with Supabase's upsert API and partial unique indexes, which
+    // was causing every single insert to silently fail.
+    const { data: existing } = await supabaseAdmin
+      .from("dividend_received")
+      .select("id")
+      .eq("user_id", user.id)
+      .eq("symbol", resolvedSymbol)
+      .eq("record_date", row.date)
+      .eq("amount", row.amount)
+      .maybeSingle();
 
-    if (!error) inserted++;
+    if (existing) {
+      alreadyExists++;
+      continue;
+    }
+
+    const { error } = await supabaseAdmin.from("dividend_received").insert({
+      user_id: user.id,
+      symbol: resolvedSymbol,
+      amount: row.amount,
+      per_share_amount: row.perShare,
+      quantity_at_record_date: row.quantity,
+      record_date: row.date,
+      source: "dhan_report",
+      note: `From Dhan report (as "${row.scripName}")`,
+    });
+
+    if (!error) {
+      inserted++;
+    } else if (!firstError) {
+      firstError = error.message;
+    }
   }
 
   return NextResponse.json({
     ok: true,
     totalRows: rows.length,
     inserted,
+    alreadyExists,
+    firstError,
     unresolvedNames,
   });
 }
