@@ -82,7 +82,7 @@ export async function GET(req: NextRequest) {
         for (const div of dividends) {
           if (!div.perShareAmount) {
             skippedNoAmount++;
-            if (!sampleSkippedNoAmount) sampleSkippedNoAmount = { symbol, ...div };
+            if (!sampleSkippedNoAmount) sampleSkippedNoAmount = { ...div };
             continue;
           }
 
