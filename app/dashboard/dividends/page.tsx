@@ -5,6 +5,14 @@ const inr = (n: number | null | undefined, d = 0) =>
   "₹" + (n ?? 0).toLocaleString("en-IN", { minimumFractionDigits: d, maximumFractionDigits: d });
 const sign = (n: number | null | undefined) => ((n ?? 0) >= 0 ? "+" : "−");
 
+const RECEIVED_FILTERS = [
+  { label: "This Month", days: 30 },
+  { label: "Last 3M", days: 90 },
+  { label: "Last 6M", days: 180 },
+  { label: "This FY", days: null }, // handled specially
+  { label: "All Time", days: -1 }, // handled specially
+];
+
 type SortMode = "date" | "amount";
 
 export default function DividendsPage() {
@@ -21,6 +29,7 @@ export default function DividendsPage() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [csvStatus, setCsvStatus] = useState("");
+  const [receivedFilter, setReceivedFilter] = useState("This FY");
 
   const [symbol, setSymbol] = useState("");
   const [amount, setAmount] = useState("");
@@ -122,6 +131,25 @@ export default function DividendsPage() {
   const portfolioValue = portfolioHoldings.reduce((s: number, h: any) => s + (h.current ?? 0), 0);
   const portfolioYield = portfolioValue > 0 ? (receivedThisFY / portfolioValue) * 100 : 0;
 
+  // Filter the received list based on the selected preset.
+  const now = new Date();
+  const fyStartYear = now.getMonth() >= 3 ? now.getFullYear() : now.getFullYear() - 1;
+  const fyStart = new Date(fyStartYear, 3, 1);
+
+  const filteredReceived = received.filter((r) => {
+    const d = new Date(r.record_date);
+    if (receivedFilter === "This FY") return d >= fyStart;
+    if (receivedFilter === "All Time") return true;
+    const opt = RECEIVED_FILTERS.find((f) => f.label === receivedFilter);
+    if (opt?.days) {
+      const cutoff = new Date();
+      cutoff.setDate(cutoff.getDate() - opt.days);
+      return d >= cutoff;
+    }
+    return true;
+  });
+  const filteredTotal = filteredReceived.reduce((s, r) => s + Number(r.amount), 0);
+
   if (loading) return <div style={{ padding: "40px 0" }}>Loading…</div>;
 
   return (
@@ -183,7 +211,7 @@ export default function DividendsPage() {
 
       <div className="list-card" style={{ marginBottom: 18 }}>
         <div className="list-head">
-          <div className="list-title">Received <span style={{ fontSize: 11, color: "var(--text-muted)", fontWeight: 400 }}>· {fyLabel}</span></div>
+          <div className="list-title">Received</div>
           <div style={{ display: "flex", gap: 8 }}>
             <label className="btn" style={{ padding: "6px 14px", fontSize: 12.5, cursor: "pointer" }}>
               Import Dhan CSV
@@ -193,6 +221,30 @@ export default function DividendsPage() {
               {showForm ? "Cancel" : "+ Add Manual Entry"}
             </button>
           </div>
+        </div>
+
+        <div style={{ display: "flex", gap: 6, marginBottom: 14, flexWrap: "wrap" }}>
+          {RECEIVED_FILTERS.map((f) => (
+            <button
+              key={f.label}
+              onClick={() => setReceivedFilter(f.label)}
+              style={{
+                background: receivedFilter === f.label ? "var(--purple)" : "transparent",
+                color: receivedFilter === f.label ? "#fff" : "var(--text-muted)",
+                border: receivedFilter === f.label ? "none" : "1px solid var(--border)",
+                borderRadius: 8, padding: "5px 12px", fontSize: 11.5, cursor: "pointer",
+              }}
+            >
+              {f.label}
+            </button>
+          ))}
+        </div>
+
+        <div style={{ fontFamily: "var(--font-mono)", fontSize: 22, fontWeight: 700, marginBottom: 14, color: "var(--gain)" }}>
+          {inr(filteredTotal)}
+          <span style={{ fontSize: 12, color: "var(--text-muted)", fontWeight: 400, marginLeft: 8 }}>
+            across {filteredReceived.length} payout{filteredReceived.length === 1 ? "" : "s"}
+          </span>
         </div>
 
         {csvStatus && <div style={{ fontSize: 11.5, color: csvStatus.startsWith("Error") ? "var(--loss)" : "var(--gain)", marginBottom: 12, lineHeight: 1.5 }}>{csvStatus}</div>}
@@ -228,12 +280,12 @@ export default function DividendsPage() {
           </div>
         )}
 
-        {received.length === 0 ? (
+        {filteredReceived.length === 0 ? (
           <div style={{ color: "var(--text-muted)", fontSize: 12.5 }}>
-            No dividends received yet — these get logged automatically once a dividend's record date passes, or add one manually for older history.
+            No dividends received in this range yet.
           </div>
         ) : (
-          received.map((r) => (
+          filteredReceived.map((r) => (
             <div key={r.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "10px 0", borderBottom: "1px solid var(--border)", fontSize: 12.5 }}>
               <span>
                 <span style={{ fontSize: 9, fontWeight: 700, padding: "2px 6px", borderRadius: 100, marginRight: 8, background: r.source === "manual" ? "rgba(138,143,163,0.14)" : r.source === "dhan_report" ? "rgba(52,211,153,0.14)" : "var(--gold-soft)", color: r.source === "manual" ? "var(--text-muted)" : r.source === "dhan_report" ? "var(--gain)" : "var(--gold)" }}>
