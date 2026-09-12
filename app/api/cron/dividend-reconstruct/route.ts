@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import { decryptSecret } from "@/lib/crypto";
 import { getAllDhanTrades } from "@/lib/dhan-ledger";
-import { shareCountAsOf, buildIsinSymbolMap } from "@/lib/dividend-reconstruct";
+import { shareCountAsOf } from "@/lib/dividend-reconstruct";
 import { getHistoricalDividendsForSymbol } from "@/lib/nse-historical-dividends";
 
 // Run this once a day (or manually). Reconstructs actual dividend income
@@ -11,9 +11,10 @@ import { getHistoricalDividendsForSymbol } from "@/lib/nse-historical-dividends"
 // today's holdings, which would be wrong for any stock you've since
 // bought or sold more of.
 //
-// Only resolves symbols currently held (via the ISIN map built from
-// current holdings) — a fully-exited historical position won't be
-// covered here and would need manual entry instead.
+// Now resolves symbols from the COMPLETE isin_symbol_map table (built
+// from Dhan's ScanX bulk data, covering ~3,139 NSE equities) instead of
+// only current holdings — so this correctly covers stocks you've fully
+// bought and sold too, not just ones still in your portfolio today.
 //   GET https://your-app.vercel.app/api/cron/dividend-reconstruct?secret=YOUR_CRON_SECRET
 export async function GET(req: NextRequest) {
   const secret = req.nextUrl.searchParams.get("secret");
@@ -34,32 +35,33 @@ export async function GET(req: NextRequest) {
     try {
       const accessToken = decryptSecret(creds.access_token_encrypted);
 
-      const { data: latestSnap } = await supabaseAdmin
-        .from("portfolio_snapshots")
-        .select("holdings")
-        .eq("user_id", user.id)
-        .order("captured_at", { ascending: false })
-        .limit(1)
-        .single();
-
-      const holdings = latestSnap?.holdings || [];
-      if (holdings.length === 0) { results.push({ user: user.id, ok: true, note: "No holdings" }); continue; }
-
-      const isinMap = buildIsinSymbolMap(holdings);
-      const isins = Object.keys(isinMap);
-      if (isins.length === 0) { results.push({ user: user.id, ok: true, note: "No ISINs on holdings yet" }); continue; }
-
-      // Pull full trade history — as far back as Dhan's API will go.
+      // Pull full trade history — as far back as Dhan's API will go —
+      // FIRST, since ISINs to check now come from actual trades ever
+      // made, not just current holdings.
       const fromDate = "2020-01-01";
       const toDate = new Date().toISOString().slice(0, 10);
       const allTrades = await getAllDhanTrades(accessToken, fromDate, toDate);
 
+      const uniqueIsins = [...new Set(allTrades.map((t: any) => t.isin).filter(Boolean))];
+      if (uniqueIsins.length === 0) { results.push({ user: user.id, ok: true, note: "No ISINs found in trade history" }); continue; }
+
+      const { data: isinRows } = await supabaseAdmin
+        .from("isin_symbol_map")
+        .select("isin, symbol")
+        .in("isin", uniqueIsins);
+
+      const isinToSymbol: Record<string, string> = {};
+      for (const row of isinRows || []) isinToSymbol[row.isin] = row.symbol;
+
       let logged = 0;
       let skipped = 0;
+      let unresolvedIsins = 0;
       let firstDiag: any = null;
 
-      for (const isin of isins) {
-        const symbol = isinMap[isin];
+      for (const isin of uniqueIsins) {
+        const symbol = isinToSymbol[isin];
+        if (!symbol) { unresolvedIsins++; continue; }
+
         const { dividends, diag } = await getHistoricalDividendsForSymbol(symbol);
         if (!firstDiag) firstDiag = { symbol, ...diag };
 
@@ -89,7 +91,15 @@ export async function GET(req: NextRequest) {
         }
       }
 
-      results.push({ user: user.id, ok: true, symbolsChecked: isins.length, logged, skipped, firstSymbolDiag: firstDiag });
+      results.push({
+        user: user.id,
+        ok: true,
+        isinsFromTrades: uniqueIsins.length,
+        unresolvedIsins,
+        logged,
+        skipped,
+        firstSymbolDiag: firstDiag,
+      });
     } catch (e: any) {
       results.push({ user: user.id, ok: false, error: e.message });
     }
