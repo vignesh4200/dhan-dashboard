@@ -17,10 +17,9 @@ export const maxDuration = 60;
 //
 // PAGINATED: processes a small batch of symbols per call, since fetching
 // full trade history plus checking 200+ symbols against NSE in one
-// request was hitting Vercel's hard platform timeout (ERR_CONNECTION_
-// ABORTED, confirmed Sept 2026 — the platform kills the connection
-// outright rather than returning a graceful timeout error). Call this
-// repeatedly with increasing offset until "hasMore" is false.
+// request was hitting Vercel's hard platform timeout. Returns an HTML page
+// with a clickable "Next Page" link so pagination doesn't require manually
+// editing the URL each time.
 export async function GET(req: NextRequest) {
   const secret = req.nextUrl.searchParams.get("secret");
   if (secret !== process.env.CRON_SECRET) {
@@ -134,5 +133,27 @@ export async function GET(req: NextRequest) {
     }
   }
 
-  return NextResponse.json({ ranAt: new Date().toISOString(), results });
+  const ranAt = new Date().toISOString();
+  const nextOffsetOverall = results.find((r) => r.hasMore)?.nextOffset;
+  const nextUrl = nextOffsetOverall !== undefined
+    ? `?secret=${secret}&offset=${nextOffsetOverall}&limit=${limit}`
+    : null;
+
+  const html = `<!DOCTYPE html>
+<html><head><meta charset="UTF-8"><title>Dividend Reconstruction</title>
+<style>
+  body { font-family: -apple-system, sans-serif; background: #0D0F1A; color: #F1F2F6; padding: 24px; max-width: 700px; margin: 0 auto; }
+  pre { background: #161927; padding: 16px; border-radius: 10px; overflow-x: auto; font-size: 12.5px; white-space: pre-wrap; word-break: break-word; }
+  a.next { display: inline-block; background: #6B5CE6; color: #fff; text-decoration: none; padding: 12px 24px; border-radius: 10px; font-weight: 600; margin-top: 16px; }
+  .done { color: #34D399; font-weight: 600; font-size: 16px; }
+</style></head>
+<body>
+  <h2>Dividend Reconstruction — offset ${offset}</h2>
+  <pre>${JSON.stringify({ ranAt, results }, null, 2)}</pre>
+  ${nextUrl
+    ? `<a class="next" href="${nextUrl}">Next Page →</a>`
+    : `<div class="done">✓ All pages processed — no more batches remaining.</div>`}
+</body></html>`;
+
+  return new NextResponse(html, { headers: { "Content-Type": "text/html" } });
 }
