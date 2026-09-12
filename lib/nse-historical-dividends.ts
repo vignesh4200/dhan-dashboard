@@ -70,8 +70,23 @@ export async function getHistoricalDividendsForSymbol(
       const date = parseNseDate(item.exDate || "");
       if (!date) continue;
 
-      const amountMatch = (item.subject || "").match(/R[se]\.?\s*([\d.]+)/i);
-      const perShareAmount = amountMatch ? parseFloat(amountMatch[1]) : null;
+      // Two dividend declaration formats seen in real NSE data:
+      // 1. "Dividend - Rs 5.5 Per Share" — direct rupee amount.
+      // 2. "Dividend - 100%" — percentage of face value (confirmed
+      //    Sept 2026, e.g. GMDCLTD's "Dividend - 100%" on a face value of
+      //    Rs 2 means Rs 2 per share). faceVal is available on the same
+      //    raw item, so this is computed rather than left unparsed.
+      let perShareAmount: number | null = null;
+      const rsMatch = (item.subject || "").match(/R[se]\.?\s*([\d.]+)/i);
+      if (rsMatch) {
+        perShareAmount = parseFloat(rsMatch[1]);
+      } else {
+        const pctMatch = (item.subject || "").match(/([\d.]+)\s*%/);
+        const faceVal = parseFloat(item.faceVal);
+        if (pctMatch && !isNaN(faceVal) && faceVal > 0) {
+          perShareAmount = (parseFloat(pctMatch[1]) / 100) * faceVal;
+        }
+      }
 
       results.push({
         symbol,
