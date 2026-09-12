@@ -35,9 +35,6 @@ export async function GET(req: NextRequest) {
     try {
       const accessToken = decryptSecret(creds.access_token_encrypted);
 
-      // Pull full trade history — as far back as Dhan's API will go —
-      // FIRST, since ISINs to check now come from actual trades ever
-      // made, not just current holdings.
       const fromDate = "2020-01-01";
       const toDate = new Date().toISOString().slice(0, 10);
       const allTrades = await getAllDhanTrades(accessToken, fromDate, toDate);
@@ -54,9 +51,12 @@ export async function GET(req: NextRequest) {
       for (const row of isinRows || []) isinToSymbol[row.isin] = row.symbol;
 
       let logged = 0;
-      let skipped = 0;
+      let skippedNoAmount = 0;
+      let skippedZeroQty = 0;
       let unresolvedIsins = 0;
       let firstDiag: any = null;
+      let sampleSkippedNoAmount: any = null;
+      let sampleSkippedZeroQty: any = null;
 
       for (const isin of uniqueIsins) {
         const symbol = isinToSymbol[isin];
@@ -66,10 +66,18 @@ export async function GET(req: NextRequest) {
         if (!firstDiag) firstDiag = { symbol, ...diag };
 
         for (const div of dividends) {
-          if (!div.perShareAmount) { skipped++; continue; }
+          if (!div.perShareAmount) {
+            skippedNoAmount++;
+            if (!sampleSkippedNoAmount) sampleSkippedNoAmount = { symbol, ...div };
+            continue;
+          }
 
           const qty = shareCountAsOf(allTrades, isin, div.recordDate);
-          if (qty <= 0) { skipped++; continue; }
+          if (qty <= 0) {
+            skippedZeroQty++;
+            if (!sampleSkippedZeroQty) sampleSkippedZeroQty = { symbol, isin, recordDate: div.recordDate, qty };
+            continue;
+          }
 
           const amount = div.perShareAmount * qty;
 
@@ -97,7 +105,10 @@ export async function GET(req: NextRequest) {
         isinsFromTrades: uniqueIsins.length,
         unresolvedIsins,
         logged,
-        skipped,
+        skippedNoAmount,
+        skippedZeroQty,
+        sampleSkippedNoAmount,
+        sampleSkippedZeroQty,
         firstSymbolDiag: firstDiag,
       });
     } catch (e: any) {
