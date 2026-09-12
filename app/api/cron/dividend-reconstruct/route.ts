@@ -7,26 +7,28 @@ import { getHistoricalDividendsForSymbol } from "@/lib/nse-historical-dividends"
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
-// Requests the maximum duration Vercel allows for this route, since
-// checking 200+ symbols against NSE is genuinely slow even in parallel.
 export const maxDuration = 60;
 
-// Run this once a day (or manually). Reconstructs actual dividend income
-// received per stock, using real trade history to compute the exact share
-// count held on each dividend's record date — not an estimate from
-// today's holdings, which would be wrong for any stock you've since
-// bought or sold more of.
+// Reconstructs actual dividend income received per stock, using real trade
+// history to compute the exact share count held on each dividend's record
+// date — not an estimate from today's holdings.
 //
-// Now resolves symbols from the COMPLETE isin_symbol_map table (built
-// from Dhan's ScanX bulk data, covering ~3,139 NSE equities) instead of
-// only current holdings — so this correctly covers stocks you've fully
-// bought and sold too, not just ones still in your portfolio today.
-//   GET https://your-app.vercel.app/api/cron/dividend-reconstruct?secret=YOUR_CRON_SECRET
+//   GET https://your-app.vercel.app/api/cron/dividend-reconstruct?secret=YOUR_CRON_SECRET&offset=0&limit=20
+//
+// PAGINATED: processes a small batch of symbols per call, since fetching
+// full trade history plus checking 200+ symbols against NSE in one
+// request was hitting Vercel's hard platform timeout (ERR_CONNECTION_
+// ABORTED, confirmed Sept 2026 — the platform kills the connection
+// outright rather than returning a graceful timeout error). Call this
+// repeatedly with increasing offset until "hasMore" is false.
 export async function GET(req: NextRequest) {
   const secret = req.nextUrl.searchParams.get("secret");
   if (secret !== process.env.CRON_SECRET) {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
+
+  const offset = parseInt(req.nextUrl.searchParams.get("offset") || "0");
+  const limit = parseInt(req.nextUrl.searchParams.get("limit") || "20");
 
   const { data: users } = await supabaseAdmin
     .from("users")
@@ -56,74 +58,70 @@ export async function GET(req: NextRequest) {
       const isinToSymbol: Record<string, string> = {};
       for (const row of isinRows || []) isinToSymbol[row.isin] = row.symbol;
 
+      const resolvedIsins = uniqueIsins.filter((isin) => isinToSymbol[isin]);
+      const pageIsins = resolvedIsins.slice(offset, offset + limit);
+
       let logged = 0;
       let skippedNoAmount = 0;
       let skippedZeroQty = 0;
-      let unresolvedIsins = 0;
       let firstDiag: any = null;
       let sampleSkippedNoAmount: any = null;
       let sampleSkippedZeroQty: any = null;
 
-      const resolvedIsins = uniqueIsins.filter((isin) => isinToSymbol[isin]);
-      unresolvedIsins = uniqueIsins.length - resolvedIsins.length;
+      const batchResults = await Promise.all(
+        pageIsins.map(async (isin) => {
+          const symbol = isinToSymbol[isin];
+          const { dividends, diag } = await getHistoricalDividendsForSymbol(symbol);
+          return { isin, symbol, dividends, diag };
+        })
+      );
 
-      // Fetch NSE data for many symbols CONCURRENTLY, in batches — 200+
-      // symbols one-at-a-time was almost certainly exceeding Vercel's
-      // function timeout, causing the page to never finish loading.
-      const BATCH_SIZE = 15;
-      for (let i = 0; i < resolvedIsins.length; i += BATCH_SIZE) {
-        const batch = resolvedIsins.slice(i, i + BATCH_SIZE);
-        const batchResults = await Promise.all(
-          batch.map(async (isin) => {
-            const symbol = isinToSymbol[isin];
-            const { dividends, diag } = await getHistoricalDividendsForSymbol(symbol);
-            return { isin, symbol, dividends, diag };
-          })
-        );
+      for (const { isin, symbol, dividends, diag } of batchResults) {
+        if (!firstDiag) firstDiag = { symbol, ...diag };
 
-        for (const { isin, symbol, dividends, diag } of batchResults) {
-          if (!firstDiag) firstDiag = { symbol, ...diag };
-
-          for (const div of dividends) {
-            if (!div.perShareAmount) {
-              skippedNoAmount++;
-              if (!sampleSkippedNoAmount) sampleSkippedNoAmount = { symbol, ...div };
-              continue;
-            }
-
-            const qty = shareCountAsOf(allTrades, isin, div.recordDate);
-            if (qty <= 0) {
-              skippedZeroQty++;
-              if (!sampleSkippedZeroQty) sampleSkippedZeroQty = { symbol, isin, recordDate: div.recordDate, qty };
-              continue;
-            }
-
-            const amount = div.perShareAmount * qty;
-
-            const { error } = await supabaseAdmin.from("dividend_received").upsert(
-              {
-                user_id: user.id,
-                symbol,
-                amount,
-                per_share_amount: div.perShareAmount,
-                quantity_at_record_date: qty,
-                record_date: div.recordDate,
-                source: "reconstructed",
-                note: div.rawLabel,
-              },
-              { onConflict: "user_id,symbol,record_date", ignoreDuplicates: true }
-            );
-
-            if (!error) logged++;
+        for (const div of dividends) {
+          if (!div.perShareAmount) {
+            skippedNoAmount++;
+            if (!sampleSkippedNoAmount) sampleSkippedNoAmount = { symbol, ...div };
+            continue;
           }
+
+          const qty = shareCountAsOf(allTrades, isin, div.recordDate);
+          if (qty <= 0) {
+            skippedZeroQty++;
+            if (!sampleSkippedZeroQty) sampleSkippedZeroQty = { symbol, isin, recordDate: div.recordDate, qty };
+            continue;
+          }
+
+          const amount = div.perShareAmount * qty;
+
+          const { error } = await supabaseAdmin.from("dividend_received").upsert(
+            {
+              user_id: user.id,
+              symbol,
+              amount,
+              per_share_amount: div.perShareAmount,
+              quantity_at_record_date: qty,
+              record_date: div.recordDate,
+              source: "reconstructed",
+              note: div.rawLabel,
+            },
+            { onConflict: "user_id,symbol,record_date", ignoreDuplicates: true }
+          );
+
+          if (!error) logged++;
         }
       }
 
       results.push({
         user: user.id,
         ok: true,
-        isinsFromTrades: uniqueIsins.length,
-        unresolvedIsins,
+        totalResolvedIsins: resolvedIsins.length,
+        offset,
+        limit,
+        processedThisPage: pageIsins.length,
+        hasMore: offset + limit < resolvedIsins.length,
+        nextOffset: offset + limit < resolvedIsins.length ? offset + limit : null,
         logged,
         skippedNoAmount,
         skippedZeroQty,
