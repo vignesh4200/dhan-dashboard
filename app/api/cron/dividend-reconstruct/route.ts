@@ -5,6 +5,12 @@ import { getAllDhanTrades } from "@/lib/dhan-ledger";
 import { shareCountAsOf } from "@/lib/dividend-reconstruct";
 import { getHistoricalDividendsForSymbol } from "@/lib/nse-historical-dividends";
 
+// This route's response was showing old field names even after code
+// updates — same caching symptom seen with Gold News earlier. These two
+// lines force the route to never be cached, regardless of layer.
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
+
 // Run this once a day (or manually). Reconstructs actual dividend income
 // received per stock, using real trade history to compute the exact share
 // count held on each dividend's record date — not an estimate from
