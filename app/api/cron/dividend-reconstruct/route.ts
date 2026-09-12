@@ -17,9 +17,9 @@ export const maxDuration = 60;
 //
 // PAGINATED: processes a small batch of symbols per call, since fetching
 // full trade history plus checking 200+ symbols against NSE in one
-// request was hitting Vercel's hard platform timeout. Returns an HTML page
-// with a clickable "Next Page" link so pagination doesn't require manually
-// editing the URL each time.
+// request was hitting Vercel's hard platform timeout. Uses a manual
+// check-then-insert instead of upsert+onConflict, since the partial
+// unique index approach was causing every single insert to silently fail.
 export async function GET(req: NextRequest) {
   const secret = req.nextUrl.searchParams.get("secret");
   if (secret !== process.env.CRON_SECRET) {
@@ -99,19 +99,26 @@ export async function GET(req: NextRequest) {
 
           const amount = div.perShareAmount * qty;
 
-          const { error } = await supabaseAdmin.from("dividend_received").upsert(
-            {
-              user_id: user.id,
-              symbol,
-              amount,
-              per_share_amount: div.perShareAmount,
-              quantity_at_record_date: qty,
-              record_date: div.recordDate,
-              source: "reconstructed",
-              note: div.rawLabel,
-            },
-            { onConflict: "user_id,symbol,record_date", ignoreDuplicates: true }
-          );
+          const { data: existing } = await supabaseAdmin
+            .from("dividend_received")
+            .select("id")
+            .eq("user_id", user.id)
+            .eq("symbol", symbol)
+            .eq("record_date", div.recordDate)
+            .maybeSingle();
+
+          if (existing) continue;
+
+          const { error } = await supabaseAdmin.from("dividend_received").insert({
+            user_id: user.id,
+            symbol,
+            amount,
+            per_share_amount: div.perShareAmount,
+            quantity_at_record_date: qty,
+            record_date: div.recordDate,
+            source: "reconstructed",
+            note: div.rawLabel,
+          });
 
           if (!error) logged++;
         }
