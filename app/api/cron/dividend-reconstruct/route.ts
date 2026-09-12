@@ -46,6 +46,11 @@ export async function GET(req: NextRequest) {
       const toDate = new Date().toISOString().slice(0, 10);
       const allTrades = await getAllDhanTrades(accessToken, fromDate, toDate);
 
+      const tradeTimes = allTrades.map((t: any) => new Date(t.exchangeTime).getTime()).filter((t) => !isNaN(t));
+      const tradeHistorySpan = tradeTimes.length > 0
+        ? { earliestTrade: new Date(Math.min(...tradeTimes)).toISOString(), latestTrade: new Date(Math.max(...tradeTimes)).toISOString(), totalTrades: allTrades.length }
+        : { earliestTrade: null, latestTrade: null, totalTrades: 0 };
+
       const uniqueIsins = [...new Set(allTrades.map((t: any) => t.isin).filter(Boolean))];
       if (uniqueIsins.length === 0) { results.push({ user: user.id, ok: true, note: "No ISINs found in trade history" }); continue; }
 
@@ -115,6 +120,7 @@ export async function GET(req: NextRequest) {
       results.push({
         user: user.id,
         ok: true,
+        tradeHistorySpan,
         totalResolvedIsins: resolvedIsins.length,
         offset,
         limit,
