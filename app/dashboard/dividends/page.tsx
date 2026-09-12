@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useState } from "react";
+import { useEffect, useState, ChangeEvent } from "react";
 
 const inr = (n: number | null | undefined, d = 0) =>
   "₹" + (n ?? 0).toLocaleString("en-IN", { minimumFractionDigits: d, maximumFractionDigits: d });
@@ -20,6 +20,7 @@ export default function DividendsPage() {
   const [showForm, setShowForm] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const [csvStatus, setCsvStatus] = useState("");
 
   const [symbol, setSymbol] = useState("");
   const [amount, setAmount] = useState("");
@@ -65,6 +66,29 @@ export default function DividendsPage() {
     }
   }
 
+  async function handleCsvUpload(e: ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setBusy(true); setCsvStatus("Importing…");
+    try {
+      const csvText = await file.text();
+      const res = await fetch("/api/dividends/import-csv", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ csvText }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Import failed");
+      setCsvStatus(`Imported ${data.inserted} of ${data.totalRows} rows.${data.unresolvedNames.length > 0 ? ` Couldn't fully resolve: ${data.unresolvedNames.join(", ")} (stored using Dhan's name as-is).` : ""}`);
+      loadData();
+    } catch (err: any) {
+      setCsvStatus("Error: " + err.message);
+    } finally {
+      setBusy(false);
+      e.target.value = "";
+    }
+  }
+
   async function deleteEntry(id: number) {
     setBusy(true);
     try {
@@ -79,6 +103,7 @@ export default function DividendsPage() {
     }
   }
 
+  // Enrich each upcoming event with its computed ₹ amount, same logic as the dashboard card.
   const enrichedEvents = events.map((e: any) => {
     const holding = portfolioHoldings.find((h: any) => h.symbol === e.symbol);
     const amountMatch = (e.label || "").match(/R[se]\.?\s*([\d.]+)/i);
@@ -159,9 +184,21 @@ export default function DividendsPage() {
       <div className="list-card" style={{ marginBottom: 18 }}>
         <div className="list-head">
           <div className="list-title">Received <span style={{ fontSize: 11, color: "var(--text-muted)", fontWeight: 400 }}>· {fyLabel}</span></div>
-          <button className="btn" style={{ padding: "6px 14px", fontSize: 12.5 }} onClick={() => setShowForm(!showForm)}>
-            {showForm ? "Cancel" : "+ Add Manual Entry"}
-          </button>
+          <div style={{ display: "flex", gap: 8 }}>
+            <label className="btn" style={{ padding: "6px 14px", fontSize: 12.5, cursor: "pointer" }}>
+              Import Dhan CSV
+              <input type="file" accept=".csv" onChange={handleCsvUpload} style={{ display: "none" }} disabled={busy} />
+            </label>
+            <button className="btn" style={{ padding: "6px 14px", fontSize: 12.5 }} onClick={() => setShowForm(!showForm)}>
+              {showForm ? "Cancel" : "+ Add Manual Entry"}
+            </button>
+          </div>
+        </div>
+
+        {csvStatus && <div style={{ fontSize: 11.5, color: csvStatus.startsWith("Error") ? "var(--loss)" : "var(--gain)", marginBottom: 12, lineHeight: 1.5 }}>{csvStatus}</div>}
+
+        <div style={{ fontSize: 11, color: "var(--text-muted)", marginBottom: 14, lineHeight: 1.5 }}>
+          Get this from Dhan: Portfolio → Reports → Dividend Payout Report → download as CSV for any date range, then upload here. This is real, settled data direct from Dhan.
         </div>
 
         {showForm && (
@@ -199,8 +236,8 @@ export default function DividendsPage() {
           received.map((r) => (
             <div key={r.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "10px 0", borderBottom: "1px solid var(--border)", fontSize: 12.5 }}>
               <span>
-                <span style={{ fontSize: 9, fontWeight: 700, padding: "2px 6px", borderRadius: 100, marginRight: 8, background: r.source === "manual" ? "rgba(138,143,163,0.14)" : "var(--gold-soft)", color: r.source === "manual" ? "var(--text-muted)" : "var(--gold)" }}>
-                  {r.source === "manual" ? "MANUAL" : "AUTO"}
+                <span style={{ fontSize: 9, fontWeight: 700, padding: "2px 6px", borderRadius: 100, marginRight: 8, background: r.source === "manual" ? "rgba(138,143,163,0.14)" : r.source === "dhan_report" ? "rgba(52,211,153,0.14)" : "var(--gold-soft)", color: r.source === "manual" ? "var(--text-muted)" : r.source === "dhan_report" ? "var(--gain)" : "var(--gold)" }}>
+                  {r.source === "manual" ? "MANUAL" : r.source === "dhan_report" ? "DHAN" : "EST."}
                 </span>
                 <b>{r.symbol}</b>{r.note && <span style={{ color: "var(--text-muted)" }}> — {r.note}</span>}
               </span>
