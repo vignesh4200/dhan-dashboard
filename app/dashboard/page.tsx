@@ -284,6 +284,8 @@ export default function DashboardOverview() {
   const [events, setEvents] = useState<any[]>([]);
   const [mfHoldings, setMfHoldings] = useState<any[]>([]);
   const [goldHoldings, setGoldHoldings] = useState<any[]>([]);
+  const [dividendReceived, setDividendReceived] = useState<any[]>([]);
+  const [dividendReceivedThisFY, setDividendReceivedThisFY] = useState(0);
 
   useEffect(() => {
     fetch("/api/portfolio").then((r) => {
@@ -299,6 +301,10 @@ export default function DashboardOverview() {
       }
       fetch("/api/mutual-funds").then((r) => r.json()).then((d) => setMfHoldings(d.holdings || []));
       fetch("/api/gold").then((r) => r.json()).then((d) => setGoldHoldings(d.holdings || []));
+      fetch("/api/dividends/page-data").then((r) => r.json()).then((d) => {
+        setDividendReceived(d.received || []);
+        setDividendReceivedThisFY(d.receivedThisFY || 0);
+      });
     });
   }, []);
 
@@ -366,6 +372,24 @@ export default function DashboardOverview() {
 
   const biggestImpact = [...data.holdings].sort((a: any, b: any) => Math.abs(b.pnl) - Math.abs(a.pnl)).slice(0, 5);
 
+  // Monthly dividend income breakdown for the chart — last 6 months.
+  const monthlyDividends: { label: string; amount: number }[] = [];
+  for (let i = 5; i >= 0; i--) {
+    const d = new Date();
+    d.setMonth(d.getMonth() - i);
+    const label = d.toLocaleDateString("en-IN", { month: "short" });
+    const monthStart = new Date(d.getFullYear(), d.getMonth(), 1);
+    const monthEnd = new Date(d.getFullYear(), d.getMonth() + 1, 0, 23, 59, 59);
+    const amount = dividendReceived
+      .filter((r: any) => {
+        const rd = new Date(r.record_date);
+        return rd >= monthStart && rd <= monthEnd;
+      })
+      .reduce((s: number, r: any) => s + Number(r.amount), 0);
+    monthlyDividends.push({ label, amount });
+  }
+  const maxMonthlyDividend = Math.max(...monthlyDividends.map((m) => m.amount), 1);
+
   return (
     <div>
       <div style={{ fontFamily: "var(--font-display)", fontSize: 22, fontWeight: 600 }}>Good day, Vignesh 👋</div>
@@ -379,11 +403,12 @@ export default function DashboardOverview() {
         <div style={{ marginTop: 8, fontSize: 13.5, color: data.day_pnl >= 0 ? "#B9F5DC" : "#FBD4CE", fontWeight: 600 }}>
           {sign(data.day_pnl)}{inr(Math.abs(data.day_pnl))} today
         </div>
-        {(mfHoldings.length > 0 || goldHoldings.length > 0) && (
+        {(mfHoldings.length > 0 || goldHoldings.length > 0 || dividendReceived.length > 0) && (
           <div style={{ marginTop: 14, display: "flex", gap: 18, fontSize: 12, opacity: 0.9, color: "#fff", flexWrap: "wrap" }}>
             <span>📈 Stocks: {inr(data.total_current)}</span>
             {mfHoldings.length > 0 && <span>🏦 Mutual Funds: {inr(mfTotalCurrent)}</span>}
             {goldHoldings.length > 0 && <span>🪙 Gold: {inr(goldTotalCurrent)}</span>}
+            {dividendReceived.length > 0 && <span>💰 Dividends (This FY): {inr(dividendReceivedThisFY)}</span>}
           </div>
         )}
       </div>
@@ -395,23 +420,31 @@ export default function DashboardOverview() {
         <div className="stat-card"><div className="stat-label">In Profit</div><div className="stat-value">{inProfitPct.toFixed(0)}%</div><div style={{ fontSize: 11.5, marginTop: 5, color: "var(--text-muted)" }}>of holdings</div></div>
       </div>
 
-      {mfHoldings.length > 0 && (
-        <div className="stat-grid" style={{ marginTop: 14 }}>
-          <div className="stat-card"><div className="stat-label">MF Invested</div><div className="stat-value">{inr(mfTotalInvested)}</div><div style={{ fontSize: 11.5, marginTop: 5, color: "var(--text-muted)" }}>{mfHoldings.length} funds</div></div>
-          <div className="stat-card"><div className="stat-label">MF Current Value</div><div className="stat-value">{inr(mfTotalCurrent)}</div><div style={{ fontSize: 11.5, marginTop: 5, color: (mfTotalCurrent - mfTotalInvested) >= 0 ? "var(--gain)" : "var(--loss)" }}>{sign(mfTotalInvested > 0 ? ((mfTotalCurrent - mfTotalInvested) / mfTotalInvested) * 100 : 0)}{Math.abs(mfTotalInvested > 0 ? ((mfTotalCurrent - mfTotalInvested) / mfTotalInvested) * 100 : 0).toFixed(1)}%</div></div>
-          <div className="stat-card"><div className="stat-label">MF Gain</div><div className="stat-value" style={{ color: (mfTotalCurrent - mfTotalInvested) >= 0 ? "var(--gain)" : "var(--loss)" }}>{sign(mfTotalCurrent - mfTotalInvested)}{inr(Math.abs(mfTotalCurrent - mfTotalInvested))}</div></div>
-          <div className="stat-card"><div className="stat-label">Combined Return</div><div className="stat-value" style={{ color: combinedGain >= 0 ? "var(--gain)" : "var(--loss)" }}>{sign(combinedGain)}{inr(Math.abs(combinedGain))}</div><div style={{ fontSize: 11.5, marginTop: 5, color: "var(--text-muted)" }}>{sign(combinedGainPct)}{Math.abs(combinedGainPct).toFixed(1)}% overall</div></div>
+      <div className="list-card" style={{ marginTop: 18 }}>
+        <div className="list-head"><div className="list-title">Asset Overview</div></div>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 12 }}>
+          <div style={{ background: "rgba(107,92,230,0.14)", borderRadius: 12, padding: 14 }}>
+            <div style={{ fontSize: 11, color: "var(--text-muted)", marginBottom: 6 }}>📈 Stocks</div>
+            <div style={{ fontFamily: "var(--font-mono)", fontSize: 17, fontWeight: 700 }}>{inr(data.total_current)}</div>
+            <div style={{ fontSize: 11, marginTop: 3, color: totalPnlPct >= 0 ? "var(--gain)" : "var(--loss)" }}>{sign(totalPnlPct)}{Math.abs(totalPnlPct).toFixed(1)}%</div>
+          </div>
+          <div style={{ background: "rgba(92,168,230,0.14)", borderRadius: 12, padding: 14 }}>
+            <div style={{ fontSize: 11, color: "var(--text-muted)", marginBottom: 6 }}>🏦 Mutual Funds</div>
+            <div style={{ fontFamily: "var(--font-mono)", fontSize: 17, fontWeight: 700 }}>{inr(mfTotalCurrent)}</div>
+            <div style={{ fontSize: 11, marginTop: 3, color: (mfTotalCurrent - mfTotalInvested) >= 0 ? "var(--gain)" : "var(--loss)" }}>{sign(mfTotalInvested > 0 ? ((mfTotalCurrent - mfTotalInvested) / mfTotalInvested) * 100 : 0)}{Math.abs(mfTotalInvested > 0 ? ((mfTotalCurrent - mfTotalInvested) / mfTotalInvested) * 100 : 0).toFixed(1)}%</div>
+          </div>
+          <div style={{ background: "var(--gold-soft)", borderRadius: 12, padding: 14 }}>
+            <div style={{ fontSize: 11, color: "var(--text-muted)", marginBottom: 6 }}>🪙 Gold</div>
+            <div style={{ fontFamily: "var(--font-mono)", fontSize: 17, fontWeight: 700 }}>{inr(goldTotalCurrent)}</div>
+            <div style={{ fontSize: 11, marginTop: 3, color: goldTotalGainPct >= 0 ? "var(--gain)" : "var(--loss)" }}>{sign(goldTotalGainPct)}{Math.abs(goldTotalGainPct).toFixed(1)}%</div>
+          </div>
+          <div style={{ background: "rgba(52,211,153,0.14)", borderRadius: 12, padding: 14 }}>
+            <div style={{ fontSize: 11, color: "var(--text-muted)", marginBottom: 6 }}>💰 Dividends</div>
+            <div style={{ fontFamily: "var(--font-mono)", fontSize: 17, fontWeight: 700 }}>{inr(dividendReceivedThisFY)}</div>
+            <div style={{ fontSize: 11, marginTop: 3, color: "var(--text-muted)" }}>this FY, {dividendReceived.length} payouts</div>
+          </div>
         </div>
-      )}
-
-      {goldHoldings.length > 0 && (
-        <div className="stat-grid" style={{ marginTop: 14 }}>
-          <div className="stat-card"><div className="stat-label">Gold Invested</div><div className="stat-value">{inr(goldTotalInvested)}</div></div>
-          <div className="stat-card"><div className="stat-label">Gold Current Value</div><div className="stat-value">{inr(goldTotalCurrent)}</div></div>
-          <div className="stat-card"><div className="stat-label">Gold Gain</div><div className="stat-value" style={{ color: goldTotalGain >= 0 ? "var(--gain)" : "var(--loss)" }}>{sign(goldTotalGain)}{inr(Math.abs(goldTotalGain))}</div></div>
-          <div className="stat-card"><div className="stat-label">Gold Return</div><div className="stat-value" style={{ color: goldTotalGainPct >= 0 ? "var(--gain)" : "var(--loss)" }}>{sign(goldTotalGainPct)}{Math.abs(goldTotalGainPct).toFixed(1)}%</div></div>
-        </div>
-      )}
+      </div>
 
       <div className="list-card" style={{ marginTop: 18 }}>
         <div className="list-head"><div className="list-title">Portfolio Performance</div></div>
@@ -458,6 +491,45 @@ export default function DashboardOverview() {
               <span style={{ color: h.pnlPct >= 0 ? "var(--gain)" : "var(--loss)" }}>{sign(h.pnlPct)}{Math.abs(h.pnlPct).toFixed(1)}%</span>
             </div>
           ))}
+        </div>
+      )}
+
+      {dividendReceived.length > 0 && (
+        <div className="list-card" style={{ marginTop: 18 }}>
+          <div className="list-head">
+            <div className="list-title">Recent Dividends <span style={{ fontSize: 10, background: "rgba(52,211,153,0.14)", color: "var(--gain)", padding: "2px 7px", borderRadius: 100, marginLeft: 8 }}>via Dhan</span></div>
+            <Link href="/dashboard/dividends" className="list-link">View All →</Link>
+          </div>
+          {dividendReceived.slice(0, 5).map((r: any) => (
+            <div key={r.id} style={{ display: "flex", justifyContent: "space-between", padding: "10px 0", borderBottom: "1px solid var(--border)", fontSize: 13 }}>
+              <span style={{ fontWeight: 600 }}>{r.symbol}<span style={{ fontWeight: 400, color: "var(--text-muted)", fontSize: 11, marginLeft: 6 }}>{r.record_date}</span></span>
+              <span style={{ color: "var(--gain)", fontWeight: 600 }}>{inr(r.amount)}</span>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {dividendReceived.length > 0 && (
+        <div className="list-card" style={{ marginTop: 18 }}>
+          <div className="list-head"><div className="list-title">Dividend Income by Month</div></div>
+          <svg viewBox="0 0 700 140" style={{ width: "100%", height: 140 }}>
+            {monthlyDividends.map((m, i) => {
+              const barWidth = 80;
+              const gap = (700 - barWidth * 6) / 7;
+              const x = gap + i * (barWidth + gap);
+              const barHeight = maxMonthlyDividend > 0 ? (m.amount / maxMonthlyDividend) * 90 : 0;
+              const y = 105 - barHeight;
+              return (
+                <g key={i}>
+                  <rect x={x} y={y} width={barWidth} height={barHeight} rx="4" fill="var(--gain)" opacity="0.85" />
+                  <text x={x + barWidth / 2} y={y - 6} fontSize="10.5" fontWeight="600" fill="var(--text)" textAnchor="middle">
+                    {m.amount > 0 ? inr(m.amount) : ""}
+                  </text>
+                  <text x={x + barWidth / 2} y="122" fontSize="11" fill="var(--text-muted)" textAnchor="middle">{m.label}</text>
+                </g>
+              );
+            })}
+          </svg>
         </div>
       )}
 
