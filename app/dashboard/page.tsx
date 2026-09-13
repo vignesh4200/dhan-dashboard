@@ -40,9 +40,20 @@ function smoothPath(coords: { x: number; y: number }[]): string {
   return path;
 }
 
+// Builds a closed polygon between the current-value curve and the invested
+// curve, so the enclosed area can be filled green (profit) or red (loss).
+function bandBetween(topCoords: { x: number; y: number }[], bottomCoords: { x: number; y: number }[]): string {
+  const top = smoothPath(topCoords);
+  const bottomReversed = [...bottomCoords].reverse();
+  const bottomPath = smoothPath(bottomReversed).replace(/^M [^C]+/, (m) => `L ${m.slice(2)}`);
+  return `${top} ${bottomPath} Z`;
+}
+
 function PerfChart() {
   const [assetType, setAssetType] = useState("all");
   const [range, setRange] = useState("1M");
+  const [customFrom, setCustomFrom] = useState("");
+  const [customTo, setCustomTo] = useState("");
   const [points, setPoints] = useState<{ captured_at: string; current: number; invested: number }[]>([]);
   const [loading, setLoading] = useState(true);
   const [hoverIdx, setHoverIdx] = useState<number | null>(null);
@@ -55,14 +66,38 @@ function PerfChart() {
       .then((d) => { setPoints(d.points || []); setLoading(false); });
   }, [assetType]);
 
+  const usingCustomRange = Boolean(customFrom && customTo);
   const rangeOption = RANGE_OPTIONS.find((r) => r.label === range);
-  const filteredPoints = rangeOption?.days
+
+  const filteredPoints = usingCustomRange
+    ? points.filter((p) => {
+        const d = new Date(p.captured_at);
+        return d >= new Date(customFrom) && d <= new Date(customTo + "T23:59:59");
+      })
+    : rangeOption?.days
     ? points.filter((p) => {
         const cutoff = new Date();
         cutoff.setDate(cutoff.getDate() - rangeOption.days!);
         return new Date(p.captured_at) >= cutoff;
       })
     : points;
+
+  function selectPreset(label: string) {
+    setRange(label);
+    setCustomFrom("");
+    setCustomTo("");
+    setHoverIdx(null);
+  }
+
+  function applyCustomRange() {
+    if (customFrom && customTo) setHoverIdx(null);
+  }
+
+  function clearCustomRange() {
+    setCustomFrom("");
+    setCustomTo("");
+    setHoverIdx(null);
+  }
 
   const tabs = (
     <div style={{ display: "flex", gap: 6, marginBottom: 18, flexWrap: "wrap" }}>
@@ -84,6 +119,74 @@ function PerfChart() {
     </div>
   );
 
+  const rangeControls = (
+    <div style={{ display: "flex", gap: 6, marginBottom: 16, flexWrap: "wrap", alignItems: "center" }}>
+      {RANGE_OPTIONS.map((r) => (
+        <button
+          key={r.label}
+          onClick={() => selectPreset(r.label)}
+          style={{
+            background: !usingCustomRange && range === r.label ? "var(--purple)" : "transparent",
+            color: !usingCustomRange && range === r.label ? "#fff" : "var(--text-muted)",
+            border: !usingCustomRange && range === r.label ? "none" : "1px solid var(--border)",
+            borderRadius: 8, padding: "5px 12px", fontSize: 11.5,
+            fontWeight: !usingCustomRange && range === r.label ? 600 : 400, cursor: "pointer",
+          }}
+        >
+          {r.label}
+        </button>
+      ))}
+
+      <div style={{ width: 1, height: 20, background: "var(--border)", margin: "0 4px" }} />
+
+      <input
+        type="date"
+        value={customFrom}
+        onChange={(e) => setCustomFrom(e.target.value)}
+        style={{
+          fontSize: 11.5, padding: "5px 8px", borderRadius: 8,
+          border: "1px solid var(--border)", background: "transparent", color: "var(--text-muted)",
+        }}
+      />
+      <span style={{ fontSize: 11.5, color: "var(--text-muted)" }}>to</span>
+      <input
+        type="date"
+        value={customTo}
+        onChange={(e) => setCustomTo(e.target.value)}
+        style={{
+          fontSize: 11.5, padding: "5px 8px", borderRadius: 8,
+          border: "1px solid var(--border)", background: "transparent", color: "var(--text-muted)",
+        }}
+      />
+      <button
+        onClick={applyCustomRange}
+        disabled={!customFrom || !customTo}
+        style={{
+          background: usingCustomRange ? "var(--purple)" : "transparent",
+          color: usingCustomRange ? "#fff" : "var(--text-muted)",
+          border: usingCustomRange ? "none" : "1px solid var(--border)",
+          borderRadius: 8, padding: "5px 12px", fontSize: 11.5,
+          fontWeight: usingCustomRange ? 600 : 400,
+          cursor: !customFrom || !customTo ? "default" : "pointer",
+          opacity: !customFrom || !customTo ? 0.5 : 1,
+        }}
+      >
+        Apply range
+      </button>
+      {usingCustomRange && (
+        <button
+          onClick={clearCustomRange}
+          style={{
+            background: "transparent", color: "var(--text-muted)", border: "none",
+            fontSize: 11.5, textDecoration: "underline", cursor: "pointer", padding: "5px 4px",
+          }}
+        >
+          Clear
+        </button>
+      )}
+    </div>
+  );
+
   if (loading) {
     return <div>{tabs}<div style={{ color: "var(--text-muted)", fontSize: 13, padding: "30px 0", textAlign: "center" }}>Loading…</div></div>;
   }
@@ -92,6 +195,7 @@ function PerfChart() {
     return (
       <div>
         {tabs}
+        {rangeControls}
         <div style={{ color: "var(--text-muted)", fontSize: 13, padding: "30px 0", textAlign: "center" }}>
           Not enough history yet for this view — it builds up over time as snapshots accumulate.
         </div>
@@ -118,20 +222,22 @@ function PerfChart() {
   }));
 
   const currentPath = smoothPath(currentCoords);
-  const areaPath = currentPath + ` L${currentCoords[currentCoords.length - 1].x},${padTop + plotH} L${currentCoords[0].x},${padTop + plotH} Z`;
   const investedPath = smoothPath(investedCoords);
+  const bandPath = bandBetween(currentCoords, investedCoords);
 
   const latest = filteredPoints[filteredPoints.length - 1];
   const first = filteredPoints[0];
   const gain = latest.current - latest.invested;
   const gainPct = latest.invested > 0 ? (gain / latest.invested) * 100 : 0;
-  const changePct = first.current > 0 ? ((latest.current - first.current) / first.current) * 100 : 0;
+  const bandColor = gain >= 0 ? "var(--gain)" : "var(--loss)";
 
   const labelCount = Math.min(5, currentCoords.length);
   const labelIndices = Array.from({ length: labelCount }, (_, i) =>
     Math.round((i * (currentCoords.length - 1)) / (labelCount - 1))
   );
-  const usesLongRange = rangeOption?.days === null || (rangeOption?.days ?? 0) > 200;
+  const usesLongRange = usingCustomRange
+    ? (new Date(customTo).getTime() - new Date(customFrom).getTime()) / 86400000 > 200
+    : rangeOption?.days === null || (rangeOption?.days ?? 0) > 200;
   const formatLabel = (iso: string) =>
     usesLongRange
       ? new Date(iso).toLocaleDateString("en-IN", { day: "numeric", month: "short" })
@@ -179,23 +285,7 @@ function PerfChart() {
         </div>
       </div>
 
-      <div style={{ display: "flex", gap: 6, marginBottom: 16, flexWrap: "wrap" }}>
-        {RANGE_OPTIONS.map((r) => (
-          <button
-            key={r.label}
-            onClick={() => { setRange(r.label); setHoverIdx(null); }}
-            style={{
-              background: range === r.label ? "var(--purple)" : "transparent",
-              color: range === r.label ? "#fff" : "var(--text-muted)",
-              border: range === r.label ? "none" : "1px solid var(--border)",
-              borderRadius: 8, padding: "5px 12px", fontSize: 11.5,
-              fontWeight: range === r.label ? 600 : 400, cursor: "pointer",
-            }}
-          >
-            {r.label}
-          </button>
-        ))}
-      </div>
+      {rangeControls}
 
       <svg
         viewBox={`0 0 ${w} ${h}`}
@@ -204,11 +294,6 @@ function PerfChart() {
         onMouseLeave={() => setHoverIdx(null)}
       >
         <defs>
-          <linearGradient id="pg" x1="0" y1="0" x2="0" y2="1">
-            <stop offset="0%" stopColor="#9C8FFF" stopOpacity="0.40" />
-            <stop offset="55%" stopColor="#6B5CE6" stopOpacity="0.10" />
-            <stop offset="100%" stopColor="#6B5CE6" stopOpacity="0" />
-          </linearGradient>
           <linearGradient id="lineGrad" x1="0" y1="0" x2="1" y2="0">
             <stop offset="0%" stopColor="#8177E8" />
             <stop offset="100%" stopColor="#B0A6FF" />
@@ -229,12 +314,22 @@ function PerfChart() {
         <text x={padLeft} y={padTop + 6} fontSize="13" fontWeight="600" fill="var(--text)">{inr(max)}</text>
         <text x={padLeft} y={padTop + plotH - 2} fontSize="13" fontWeight="600" fill="var(--text)">{inr(min)}</text>
 
-        <path d={investedPath} fill="none" stroke="var(--text-muted)" strokeWidth="1.75" strokeLinecap="round" />
-        <path d={areaPath} fill="url(#pg)" />
+        {/* profit/loss band between Current and Invested */}
+        <path d={bandPath} fill={bandColor} opacity="0.16" />
+
+        <path d={investedPath} fill="none" stroke="var(--text-muted)" strokeWidth="1.75" strokeLinecap="round" strokeDasharray="5,4" />
         <path d={currentPath} fill="none" stroke="url(#lineGrad)" strokeWidth="3" strokeLinecap="round" filter="url(#chartGlow)" />
 
         <circle cx={currentCoords[currentCoords.length - 1].x} cy={currentCoords[currentCoords.length - 1].y} r="8" fill="#B0A6FF" opacity="0.25" />
         <circle cx={currentCoords[currentCoords.length - 1].x} cy={currentCoords[currentCoords.length - 1].y} r="4.5" fill="#fff" stroke="#8177E8" strokeWidth="2.5" />
+
+        <text
+          x={currentCoords[currentCoords.length - 1].x - 10}
+          y={currentCoords[currentCoords.length - 1].y - 14}
+          fontSize="13" fontWeight="700" fill={bandColor} textAnchor="end"
+        >
+          {sign(gainPct)}{Math.abs(gainPct).toFixed(1)}%
+        </text>
 
         {labelIndices.map((idx, i) => {
           const c = currentCoords[idx];
