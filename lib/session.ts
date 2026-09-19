@@ -1,12 +1,12 @@
 import { cookies } from "next/headers";
-import { firebaseAdminAuth } from "@/lib/firebaseAdmin";
+import { getFirebaseAdminAuth } from "@/lib/firebaseAdmin";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 
 export async function getCurrentUser() {
   const sessionCookie = cookies().get("session")?.value;
   if (!sessionCookie) return null;
 
-  const decoded = await firebaseAdminAuth.verifySessionCookie(sessionCookie).catch(() => null);
+  const decoded = await getFirebaseAdminAuth().verifySessionCookie(sessionCookie).catch(() => null);
   if (!decoded) return null;
 
   const { data } = await supabaseAdmin
