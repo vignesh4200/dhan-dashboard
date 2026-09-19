@@ -1,9 +1,6 @@
 import { initializeApp, getApps, cert } from "firebase-admin/app";
-import { getAuth } from "firebase-admin/auth";
+import { getAuth, type Auth } from "firebase-admin/auth";
 
-// Server-only. FIREBASE_PRIVATE_KEY comes from your Firebase service account JSON —
-// paste it into .env with \n escaped (most hosts, including Vercel, handle this fine
-// if you wrap the value in quotes and keep the literal \n sequences).
 function initAdmin() {
   if (getApps().length) return getApps()[0];
   return initializeApp({
@@ -15,5 +12,10 @@ function initAdmin() {
   });
 }
 
-const app = initAdmin();
-export const firebaseAdminAuth = getAuth(app);
+let _auth: Auth | null = null;
+export function getFirebaseAdminAuth(): Auth {
+  if (!_auth) {
+    _auth = getAuth(initAdmin());
+  }
+  return _auth;
+}
