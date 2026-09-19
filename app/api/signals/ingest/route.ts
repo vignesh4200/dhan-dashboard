@@ -92,6 +92,22 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
 
+  // TEMPORARY DIAGNOSTIC — echoes back exactly what the server received, so
+  // we can compare a browser request against WebFetch's request byte-for-byte
+  // instead of guessing. Always returns 200 so the caller actually sees the
+  // body (a 400 elsewhere in this handler was coming back to WebFetch as an
+  // opaque error with no body visible). Safe to remove once the WebFetch-vs-
+  // browser 400 mystery on this endpoint is solved.
+  if (req.nextUrl.searchParams.get("debug") === "1") {
+    return NextResponse.json({
+      url: req.url,
+      rawSearch: req.nextUrl.search,
+      searchParams: Object.fromEntries(req.nextUrl.searchParams.entries()),
+      headers: Object.fromEntries(req.headers.entries()),
+      method: req.method,
+    });
+  }
+
   // Compact single-row transport: individual short query params instead of
   // a JSON blob. Exists because some callers (notably the WebFetch tool
   // used by the scheduled broker-call scan) enforce their own URL length
