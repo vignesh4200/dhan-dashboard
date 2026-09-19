@@ -142,6 +142,44 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ signalType, kept: Math.min(keep, allIds.length), deleted: idsToDelete.length });
   }
 
+  // Read-only audit view — lists rows (all types by default, or one type via
+  // st=) so junk/test data can actually be seen and identified instead of
+  // guessed at. GET .../ingest?secret=...&list=1[&st=broker_call][&limit=200]
+  if (req.nextUrl.searchParams.get("list") === "1") {
+    const signalType = req.nextUrl.searchParams.get("st");
+    const limit = Number(req.nextUrl.searchParams.get("limit") || "200");
+    let query = supabaseAdmin
+      .from("smart_money_signals")
+      .select("id, external_id, signal_type, symbol, company, source, side, target, disclosed_date, updated_at")
+      .order("disclosed_date", { ascending: false })
+      .limit(limit);
+    if (signalType) query = query.eq("signal_type", signalType);
+    const { data, error } = await query;
+    if (error) {
+      return NextResponse.json({ error: error.message }, { status: 500 });
+    }
+    return NextResponse.json({ count: data?.length ?? 0, rows: data ?? [] });
+  }
+
+  // Targeted delete by external_id — for removing specific junk/test rows
+  // identified via ?list=1, rather than only being able to trim by count
+  // (?prune=1). GET .../ingest?secret=...&del=1&ids=id1,id2,id3
+  if (req.nextUrl.searchParams.get("del") === "1") {
+    const idsParam = req.nextUrl.searchParams.get("ids");
+    if (!idsParam) {
+      return NextResponse.json({ error: "with ?del=1, also require ids=<comma-separated external_id list>" }, { status: 400 });
+    }
+    const ids = idsParam.split(",").map((s) => s.trim()).filter(Boolean);
+    const { error, count } = await supabaseAdmin
+      .from("smart_money_signals")
+      .delete({ count: "exact" })
+      .in("external_id", ids);
+    if (error) {
+      return NextResponse.json({ error: error.message }, { status: 500 });
+    }
+    return NextResponse.json({ requested: ids.length, deleted: count ?? 0 });
+  }
+
   // Compact single-row transport: individual short query params instead of
   // a JSON blob. Exists because some callers (notably the WebFetch tool
   // used by the scheduled scans) enforce their own URL length cap well
