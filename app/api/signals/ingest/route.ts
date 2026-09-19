@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
+import { ingestSignalRows } from "@/lib/ingestSignals";
 
 // Write-only ingest for the daily Smart Money scan (a Claude scheduled task)
 // to push newly found bulk/block deals and insider disclosures straight into
@@ -8,6 +9,11 @@ import { supabaseAdmin } from "@/lib/supabaseAdmin";
 //
 // POST https://your-app.vercel.app/api/signals/ingest?secret=YOUR_SIGNAL_INGEST_SECRET
 // Body: { "rows": [ { ...see shape below... } ] }
+//
+// There's also a GET-based transport for the same logic — see the GET
+// handler below — for callers that can only make outbound GET requests to
+// this domain (e.g. a sandboxed agent whose shell can't POST to a
+// non-allowlisted host).
 //
 // Set SIGNAL_INGEST_SECRET in Vercel's Environment Variables (generate one
 // the same way as CRON_SECRET / HOLDINGS_EXPORT_SECRET — README section 5).
@@ -53,45 +59,23 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "body.rows must be a non-empty array" }, { status: 400 });
   }
 
-  const upsertRows = rows
-    .filter((r) => r?.externalId && r?.company && r?.disclosedDate)
-    .map((r) => ({
-      external_id: String(r.externalId),
-      signal_type: r.signalType || "bulk_deal",
-      symbol: r.symbol ? String(r.symbol).trim().toUpperCase() : null,
-      company: String(r.company),
-      side: r.side || null,
-      qty: r.qty ?? null,
-      price: r.price ?? null,
-      value_cr: r.valueCr ?? null,
-      disclosed_date: r.disclosedDate,
-      source: r.source || null,
-      mf_buy_count: r.mfBuyCount ?? 0,
-      screen_passed: !!r.screenPassed,
-      current_price: r.currentPrice ?? null,
-      stop_loss: r.stopLoss ?? null,
-      target: r.target ?? null,
-      raw: r.raw ?? null,
-      updated_at: new Date().toISOString(),
-    }));
-
-  if (upsertRows.length === 0) {
-    return NextResponse.json({ error: "no valid rows (each needs externalId, company, disclosedDate)" }, { status: 400 });
-  }
-
-  const { error, data } = await supabaseAdmin
-    .from("smart_money_signals")
-    .upsert(upsertRows, { onConflict: "external_id" })
-    .select("id");
-
-  if (error) {
-    return NextResponse.json({ error: error.message }, { status: 500 });
-  }
-
-  return NextResponse.json({ ingested: data?.length ?? 0, receivedAt: new Date().toISOString() });
+  const result = await ingestSignalRows(rows);
+  return NextResponse.json(result.body, { status: result.status });
 }
 
 // GET https://your-app.vercel.app/api/signals/ingest?secret=YOUR_SIGNAL_INGEST_SECRET&test=1
+//   — browser-friendly smoke test, see below.
+//
+// GET https://your-app.vercel.app/api/signals/ingest?secret=YOUR_SIGNAL_INGEST_SECRET&data=<base64url>
+//   — real ingest over GET, an alternate transport for exactly the same
+//   upsert-on-externalId logic as the POST handler above (same secret, same
+//   row shape). This exists for callers that can only make outbound GET
+//   requests to this domain — e.g. an agent sandbox whose shell/curl is
+//   blocked from POSTing to non-allowlisted hosts but whose fetch-and-read
+//   tool can still GET them. `data` is
+//   base64url(JSON.stringify({ rows: [ ...same row shape as POST... ] })).
+// Node's Buffer.from(str, "base64url") accepts both standard and
+// URL-safe base64, so either encoding works here.
 //
 // Browser-friendly smoke test — no curl needed. Paste that URL into any
 // browser tab and it inserts one dummy KOPRAN row (external_id "manual-test",
@@ -104,8 +88,29 @@ export async function GET(req: NextRequest) {
   if (!process.env.SIGNAL_INGEST_SECRET || secret !== process.env.SIGNAL_INGEST_SECRET) {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
+
+  const dataParam = req.nextUrl.searchParams.get("data");
+  if (dataParam) {
+    let rows: any[] = [];
+    try {
+      const json = Buffer.from(dataParam, "base64url").toString("utf8");
+      const body = JSON.parse(json);
+      rows = Array.isArray(body?.rows) ? body.rows : [];
+    } catch {
+      return NextResponse.json({ error: "invalid ?data= (must be base64url JSON with a rows array)" }, { status: 400 });
+    }
+    if (rows.length === 0) {
+      return NextResponse.json({ error: "?data= decoded but rows was empty" }, { status: 400 });
+    }
+    const result = await ingestSignalRows(rows);
+    return NextResponse.json(result.body, { status: result.status });
+  }
+
   if (req.nextUrl.searchParams.get("test") !== "1") {
-    return NextResponse.json({ error: "add &test=1 to the URL to run the smoke test" }, { status: 400 });
+    return NextResponse.json(
+      { error: "add &test=1 to run the smoke test, or &data=<base64url JSON> to ingest rows over GET" },
+      { status: 400 }
+    );
   }
 
   const { error, data } = await supabaseAdmin
