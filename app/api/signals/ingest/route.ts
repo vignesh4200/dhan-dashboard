@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
-import { ingestSignalRows } from "@/lib/ingestSignals";
+import { ingestSignalRows, defaultBrokerCallExternalId } from "@/lib/ingestSignals";
 
 // Write-only ingest for the daily Smart Money scan (a Claude scheduled task)
 // to push newly found bulk/block deals and insider disclosures straight into
@@ -13,7 +13,10 @@ import { ingestSignalRows } from "@/lib/ingestSignals";
 // There's also a GET-based transport for the same logic — see the GET
 // handler below — for callers that can only make outbound GET requests to
 // this domain (e.g. a sandboxed agent whose shell can't POST to a
-// non-allowlisted host).
+// non-allowlisted host). Two GET flavors: compact single-row query params
+// (?sym=&co=&sd=&pr=&tg=&dt=&src=, one row per call — short enough to clear
+// a caller's own URL-length limits) and a &data=<base64url JSON> blob for
+// callers without that constraint.
 //
 // Set SIGNAL_INGEST_SECRET in Vercel's Environment Variables (generate one
 // the same way as CRON_SECRET / HOLDINGS_EXPORT_SECRET — README section 5).
@@ -89,6 +92,45 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
 
+  // Compact single-row transport: individual short query params instead of
+  // a JSON blob. Exists because some callers (notably the WebFetch tool
+  // used by the scheduled broker-call scan) enforce their own URL length
+  // cap well under what a base64-encoded row can fit — this stays short
+  // enough to clear that. One row per call; call it multiple times for
+  // multiple rows. Params: sym, co, sd (side), pr (price), tg (target),
+  // dt (disclosedDate), src (source), and optionally id (externalId — if
+  // omitted, derived from dt+src+sym using the same convention the scan
+  // task already uses) and cp (currentPrice).
+  const sym = req.nextUrl.searchParams.get("sym");
+  if (sym) {
+    const co = req.nextUrl.searchParams.get("co");
+    const dt = req.nextUrl.searchParams.get("dt");
+    const src = req.nextUrl.searchParams.get("src");
+    if (!co || !dt || !src) {
+      return NextResponse.json({ error: "with ?sym=, also require co, dt, and src" }, { status: 400 });
+    }
+    const id = req.nextUrl.searchParams.get("id") || defaultBrokerCallExternalId(dt, src, sym);
+    const pr = req.nextUrl.searchParams.get("pr");
+    const tg = req.nextUrl.searchParams.get("tg");
+    const cp = req.nextUrl.searchParams.get("cp");
+    const row = {
+      externalId: id,
+      signalType: "broker_call",
+      symbol: sym,
+      company: co,
+      side: req.nextUrl.searchParams.get("sd") || null,
+      price: pr ? Number(pr) : null,
+      target: tg ? Number(tg) : null,
+      currentPrice: cp ? Number(cp) : null,
+      disclosedDate: dt,
+      source: src,
+      mfBuyCount: 0,
+      screenPassed: false,
+    };
+    const result = await ingestSignalRows([row]);
+    return NextResponse.json(result.body, { status: result.status });
+  }
+
   const dataParam = req.nextUrl.searchParams.get("data");
   if (dataParam) {
     let rows: any[] = [];
@@ -108,7 +150,11 @@ export async function GET(req: NextRequest) {
 
   if (req.nextUrl.searchParams.get("test") !== "1") {
     return NextResponse.json(
-      { error: "add &test=1 to run the smoke test, or &data=<base64url JSON> to ingest rows over GET" },
+      {
+        error:
+          "add &test=1 to run the smoke test, &sym=...&co=...&sd=...&pr=...&tg=...&dt=...&src=... for one compact row, " +
+          "or &data=<base64url JSON> to ingest rows over GET",
+      },
       { status: 400 }
     );
   }
