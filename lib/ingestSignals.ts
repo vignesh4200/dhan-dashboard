@@ -39,7 +39,7 @@ export async function ingestSignalRows(rows: any[]) {
       signal_type: r.signalType || "bulk_deal",
       symbol: r.symbol ? String(r.symbol).trim().toUpperCase() : null,
       company: String(r.company),
-      side: r.side || null,
+      side: r.side ? String(r.side).trim().toUpperCase() : null,
       qty: r.qty ?? null,
       price: r.price ?? null,
       value_cr: r.valueCr ?? null,
