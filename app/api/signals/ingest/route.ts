@@ -99,11 +99,15 @@ export async function GET(req: NextRequest) {
   // opaque error with no body visible). Safe to remove once the WebFetch-vs-
   // browser 400 mystery on this endpoint is solved.
   if (req.nextUrl.searchParams.get("debug") === "1") {
+    const headersObj: Record<string, string> = {};
+    req.headers.forEach((value, key) => {
+      headersObj[key] = value;
+    });
     return NextResponse.json({
       url: req.url,
       rawSearch: req.nextUrl.search,
       searchParams: Object.fromEntries(req.nextUrl.searchParams.entries()),
-      headers: Object.fromEntries(req.headers.entries()),
+      headers: headersObj,
       method: req.method,
     });
   }
