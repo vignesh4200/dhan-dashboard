@@ -65,4 +65,13 @@ button{font-family:inherit;}
 .settings-form{max-width:480px;}
 .settings-status{display:inline-flex;align-items:center;gap:6px;font-size:12.5px;padding:4px 10px;border-radius:100px;margin-bottom:20px;}
 .settings-status.ok{color:var(--gain);background:var(--gain-soft);}
-.settings-status.missing{color:var(--loss);background:var(--loss-soft);}
+.settings-status.missing{color:var(--loss);background:var(--loss-soft);}/* ---------- Smart Money Signals page ---------- */
+.chip-row{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:16px;}
+.chip{background:var(--panel-2);border:1px solid var(--border-strong);color:var(--text-muted);border-radius:100px;padding:6px 13px;font-size:12.5px;font-weight:600;cursor:pointer;}
+.chip.active{background:var(--gold-soft);border-color:var(--gold);color:var(--text);}
+.tag-hold{display:inline-flex;align-items:center;background:var(--amber-soft);color:var(--amber);border-radius:6px;padding:1px 6px;font-size:10px;font-weight:700;letter-spacing:0.02em;margin-left:7px;vertical-align:middle;}
+.tag-screen{display:inline-flex;align-items:center;background:var(--gain-soft);color:var(--gain);border-radius:6px;padding:1px 6px;font-size:10.5px;font-weight:700;}
+.btn-sm{width:auto;padding:6px 12px;font-size:12.5px;border-radius:8px;}
+.btn-ghost{background:transparent;border:1px solid var(--border-strong);color:var(--text);}
+.track-form{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:8px;padding:10px;background:var(--panel-2);border-radius:10px;}
+.track-form input{width:100px;background:var(--panel);border:1px solid var(--border-strong);border-radius:8px;padding:7px 9px;color:var(--text);font-family:var(--font-mono);font-size:12.5px;}
