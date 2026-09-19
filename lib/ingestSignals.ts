@@ -23,6 +23,14 @@ import { supabaseAdmin } from "@/lib/supabaseAdmin";
 //   target?: number
 //   raw?: object
 // }
+
+// Same dedupe-key convention the scheduled broker-call scan already uses:
+// brokercall-{YYYY-MM-DD}-{firm lowercased, spaces to hyphens}-{symbol lowercased}
+export function defaultBrokerCallExternalId(disclosedDate: string, source: string, symbol: string) {
+  const slug = (s: string) => s.trim().toLowerCase().replace(/\s+/g, "-");
+  return `brokercall-${disclosedDate}-${slug(source)}-${slug(symbol)}`;
+}
+
 export async function ingestSignalRows(rows: any[]) {
   const upsertRows = (Array.isArray(rows) ? rows : [])
     .filter((r) => r?.externalId && r?.company && r?.disclosedDate)
