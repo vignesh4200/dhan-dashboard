@@ -90,3 +90,55 @@ export async function POST(req: NextRequest) {
 
   return NextResponse.json({ ingested: data?.length ?? 0, receivedAt: new Date().toISOString() });
 }
+
+// GET https://your-app.vercel.app/api/signals/ingest?secret=YOUR_SIGNAL_INGEST_SECRET&test=1
+//
+// Browser-friendly smoke test — no curl needed. Paste that URL into any
+// browser tab and it inserts one dummy KOPRAN row (external_id "manual-test",
+// so hitting this link again just re-upserts the same row instead of piling
+// up duplicates). Confirms the secret, the Supabase write, and the page's
+// read path all work end to end. Requires ?test=1 so it can never be hit by
+// accident with a bare secret in the URL.
+export async function GET(req: NextRequest) {
+  const secret = req.nextUrl.searchParams.get("secret");
+  if (!process.env.SIGNAL_INGEST_SECRET || secret !== process.env.SIGNAL_INGEST_SECRET) {
+    return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+  }
+  if (req.nextUrl.searchParams.get("test") !== "1") {
+    return NextResponse.json({ error: "add &test=1 to the URL to run the smoke test" }, { status: 400 });
+  }
+
+  const { error, data } = await supabaseAdmin
+    .from("smart_money_signals")
+    .upsert(
+      [
+        {
+          external_id: "manual-test",
+          signal_type: "bulk_deal",
+          symbol: "KOPRAN",
+          company: "Kopran Ltd (test row — safe to ignore/delete)",
+          side: "BUY",
+          qty: 10000,
+          price: 245.5,
+          value_cr: 2.5,
+          disclosed_date: new Date().toISOString().slice(0, 10),
+          source: "NSE bulk deal",
+          mf_buy_count: 0,
+          screen_passed: false,
+          updated_at: new Date().toISOString(),
+        },
+      ],
+      { onConflict: "external_id" }
+    )
+    .select("id");
+
+  if (error) {
+    return NextResponse.json({ error: error.message }, { status: 500 });
+  }
+
+  return NextResponse.json({
+    ok: true,
+    message: "Test row inserted/updated. Check /dashboard/signals for a KOPRAN row.",
+    ingested: data?.length ?? 0,
+  });
+}
