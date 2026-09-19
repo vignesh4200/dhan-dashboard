@@ -112,6 +112,36 @@ export async function GET(req: NextRequest) {
     });
   }
 
+  // Housekeeping — caps how many rows of a given signalType are kept, so the
+  // dashboard's broker-calls list doesn't grow forever. Deletes the oldest
+  // rows beyond the most recent N (by disclosedDate, then updated_at as a
+  // tiebreak for same-day rows), keeping the newest N.
+  // GET .../ingest?secret=...&prune=1&keep=50&st=broker_call (st defaults to
+  // "broker_call"; keep defaults to 50).
+  if (req.nextUrl.searchParams.get("prune") === "1") {
+    const signalType = req.nextUrl.searchParams.get("st") || "broker_call";
+    const keep = Number(req.nextUrl.searchParams.get("keep") || "50");
+    const { data: existing, error: selError } = await supabaseAdmin
+      .from("smart_money_signals")
+      .select("id")
+      .eq("signal_type", signalType)
+      .order("disclosed_date", { ascending: false })
+      .order("updated_at", { ascending: false });
+    if (selError) {
+      return NextResponse.json({ error: selError.message }, { status: 500 });
+    }
+    const allIds = (existing || []).map((r) => r.id);
+    const idsToDelete = allIds.slice(keep);
+    if (idsToDelete.length === 0) {
+      return NextResponse.json({ signalType, kept: allIds.length, deleted: 0 });
+    }
+    const { error: delError } = await supabaseAdmin.from("smart_money_signals").delete().in("id", idsToDelete);
+    if (delError) {
+      return NextResponse.json({ error: delError.message }, { status: 500 });
+    }
+    return NextResponse.json({ signalType, kept: Math.min(keep, allIds.length), deleted: idsToDelete.length });
+  }
+
   // Compact single-row transport: individual short query params instead of
   // a JSON blob. Exists because some callers (notably the WebFetch tool
   // used by the scheduled scans) enforce their own URL length cap well
