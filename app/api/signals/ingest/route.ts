@@ -114,13 +114,21 @@ export async function GET(req: NextRequest) {
 
   // Compact single-row transport: individual short query params instead of
   // a JSON blob. Exists because some callers (notably the WebFetch tool
-  // used by the scheduled broker-call scan) enforce their own URL length
-  // cap well under what a base64-encoded row can fit — this stays short
-  // enough to clear that. One row per call; call it multiple times for
-  // multiple rows. Params: sym, co, sd (side), pr (price), tg (target),
-  // dt (disclosedDate), src (source), and optionally id (externalId — if
-  // omitted, derived from dt+src+sym using the same convention the scan
-  // task already uses) and cp (currentPrice).
+  // used by the scheduled scans) enforce their own URL length cap well
+  // under what a base64-encoded row can fit — this stays short enough to
+  // clear that. One row per call; call it multiple times for multiple rows.
+  //
+  // Core params: sym, co, dt (disclosedDate), firm (source — "src" also
+  // accepted, see note below), sd (side), pr (price), tg (target), cp
+  // (currentPrice), id (externalId — if omitted, derived from dt+firm+sym).
+  //
+  // Extra params for the richer bulk-deal/insider row shape (all optional,
+  // default to the broker-call scan's original behavior when omitted so
+  // that scan's calls are unaffected): st (signalType — "bulk_deal" |
+  // "block_deal" | "insider" | "broker_call", default "broker_call"), qty
+  // (quantity), vcr (valueCr), mfc (mfBuyCount — "1" or "0", default "0"),
+  // scr (screenPassed — "1" or "0"/"true"/"false", default "0"), sl
+  // (stopLoss).
   const sym = req.nextUrl.searchParams.get("sym");
   if (sym) {
     const co = req.nextUrl.searchParams.get("co");
@@ -142,19 +150,29 @@ export async function GET(req: NextRequest) {
     const pr = req.nextUrl.searchParams.get("pr");
     const tg = req.nextUrl.searchParams.get("tg");
     const cp = req.nextUrl.searchParams.get("cp");
+    const st = req.nextUrl.searchParams.get("st");
+    const qty = req.nextUrl.searchParams.get("qty");
+    const vcr = req.nextUrl.searchParams.get("vcr");
+    const mfc = req.nextUrl.searchParams.get("mfc");
+    const scr = req.nextUrl.searchParams.get("scr");
+    const sl = req.nextUrl.searchParams.get("sl");
+    const truthy = (v: string | null) => v === "1" || v === "true";
     const row = {
       externalId: id,
-      signalType: "broker_call",
+      signalType: st || "broker_call",
       symbol: sym,
       company: co,
       side: req.nextUrl.searchParams.get("sd") || null,
+      qty: qty ? Number(qty) : null,
       price: pr ? Number(pr) : null,
+      valueCr: vcr ? Number(vcr) : null,
       target: tg ? Number(tg) : null,
       currentPrice: cp ? Number(cp) : null,
+      stopLoss: sl ? Number(sl) : null,
       disclosedDate: dt,
       source: src,
-      mfBuyCount: 0,
-      screenPassed: false,
+      mfBuyCount: truthy(mfc) ? 1 : 0,
+      screenPassed: truthy(scr),
     };
     const result = await ingestSignalRows([row]);
     return NextResponse.json(result.body, { status: result.status });
