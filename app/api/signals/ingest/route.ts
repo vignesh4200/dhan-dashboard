@@ -125,9 +125,18 @@ export async function GET(req: NextRequest) {
   if (sym) {
     const co = req.nextUrl.searchParams.get("co");
     const dt = req.nextUrl.searchParams.get("dt");
-    const src = req.nextUrl.searchParams.get("src");
+    // "firm" is the primary name for this param, "src" a backward-compatible
+    // alias. Confirmed by a debug echo that the WebFetch tool used by the
+    // scheduled scan silently strips a query param literally named "src"
+    // before the request ever leaves — almost certainly generic
+    // tracking-parameter sanitization (utm_source/ref/src are the classic
+    // set). Nothing wrong with this server or the caller's logic; it just
+    // never received the key. "firm" isn't a common tracking-param name, so
+    // it passes through untouched. Browser-typed/bookmarked links using the
+    // old ?src= still work via the fallback.
+    const src = req.nextUrl.searchParams.get("firm") || req.nextUrl.searchParams.get("src");
     if (!co || !dt || !src) {
-      return NextResponse.json({ error: "with ?sym=, also require co, dt, and src" }, { status: 400 });
+      return NextResponse.json({ error: "with ?sym=, also require co, dt, and firm (src also accepted)" }, { status: 400 });
     }
     const id = req.nextUrl.searchParams.get("id") || defaultBrokerCallExternalId(dt, src, sym);
     const pr = req.nextUrl.searchParams.get("pr");
