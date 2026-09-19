@@ -68,10 +68,16 @@ export default function SignalsPage() {
   const router = useRouter();
   const [signals, setSignals] = useState<Signal[] | null>(null);
   const [tracks, setTracks] = useState<Track[] | null>(null);
-  const [filter, setFilter] = useState<"all" | "buy" | "screen" | "mine">("all");
+  const [filter, setFilter] = useState<"all" | "buy" | "screen" | "mine" | "calls">("all");
+
+  // Bought?/close forms for the main disclosure-signals table
   const [openForm, setOpenForm] = useState<number | null>(null);
   const [entryPrice, setEntryPrice] = useState("");
   const [qty, setQty] = useState("");
+
+  // Close form for "My tracked trades" (bought disclosure signals)
+  const [closeTrackId, setCloseTrackId] = useState<number | null>(null);
+  const [closeTrackExit, setCloseTrackExit] = useState("");
 
   const [brokerCalls, setBrokerCalls] = useState<BrokerCall[] | null>(null);
   const [showAddCall, setShowAddCall] = useState(false);
@@ -84,6 +90,13 @@ export default function SignalsPage() {
   const [bcTarget, setBcTarget] = useState("");
   const [bcNotes, setBcNotes] = useState("");
   const [bcCheck, setBcCheck] = useState<{ status: "idle" | "checking" | "ok" | "bad"; name?: string; price?: number; error?: string }>({ status: "idle" });
+
+  // Bought?/close forms for individual broker-call rows
+  const [bcBoughtOpen, setBcBoughtOpen] = useState<number | null>(null);
+  const [bcBoughtEntry, setBcBoughtEntry] = useState("");
+  const [bcBoughtQty, setBcBoughtQty] = useState("");
+  const [bcCloseOpen, setBcCloseOpen] = useState<number | null>(null);
+  const [bcCloseExit, setBcCloseExit] = useState("");
 
   const loadSignals = () =>
     fetch("/api/signals").then((r) => {
@@ -112,6 +125,8 @@ export default function SignalsPage() {
     setOpenForm(null);
     setEntryPrice("");
     setQty("");
+    setCloseTrackId(null);
+    setCloseTrackExit("");
     loadSignals();
     loadTracks();
   };
@@ -158,6 +173,11 @@ export default function SignalsPage() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ id, status, ...extra }),
     });
+    setBcBoughtOpen(null);
+    setBcBoughtEntry("");
+    setBcBoughtQty("");
+    setBcCloseOpen(null);
+    setBcCloseExit("");
     loadBrokerCalls();
   };
 
@@ -167,6 +187,7 @@ export default function SignalsPage() {
   if (filter === "buy") rows = rows.filter((r) => r.side === "BUY");
   if (filter === "screen") rows = rows.filter((r) => r.screenPassed);
   if (filter === "mine") rows = rows.filter((r) => r.isHolding);
+  if (filter === "calls") rows = rows.filter((r) => r.signalType === "broker_call");
 
   const portfolioMatches = signals.filter((s) => s.isHolding).length;
   const boughtTracks = (tracks || []).filter((t) => t.status === "bought");
@@ -179,7 +200,7 @@ export default function SignalsPage() {
     <div>
       <div style={{ fontFamily: "var(--font-display)", fontSize: 22, fontWeight: 600, marginBottom: 4 }}>Smart Signals</div>
       <div style={{ color: "var(--text-muted)", fontSize: 13, marginBottom: 20 }}>
-        Bulk/block deals &amp; insider disclosures, updated automatically by the daily scan · current prices refresh every 15 min
+        Bulk/block deals, insider disclosures &amp; public brokerage calls, updated automatically · prices refresh every 15 min
         {portfolioMatches > 0 && <> · <span style={{ color: "var(--amber)" }}>{portfolioMatches} touch stocks you hold</span></>}
       </div>
 
@@ -216,22 +237,47 @@ export default function SignalsPage() {
             </thead>
             <tbody>
               {boughtTracks.map((t) => (
-                <tr key={t.id} style={{ borderTop: "1px solid var(--border)" }}>
-                  <td style={{ padding: "11px 0", fontWeight: 600 }}>{t.symbol}</td>
-                  <td style={{ textAlign: "right", fontFamily: "var(--font-mono)" }}>{inr(t.entryPrice, 2)}</td>
-                  <td style={{ textAlign: "right", fontFamily: "var(--font-mono)" }}>{t.qty ?? "—"}</td>
-                  <td style={{ textAlign: "right", fontFamily: "var(--font-mono)" }}>{t.ltp ? t.ltp.toFixed(2) : "—"}</td>
-                  <td style={{ textAlign: "right", fontFamily: "var(--font-mono)", color: "var(--loss)" }}>{inr(t.stopLoss, 2)}</td>
-                  <td style={{ textAlign: "right", fontFamily: "var(--font-mono)", color: "var(--gain)" }}>{inr(t.target, 2)}</td>
-                  <td style={{ textAlign: "right", fontFamily: "var(--font-mono)", color: (t.pnl ?? 0) >= 0 ? "var(--gain)" : "var(--loss)" }}>
-                    {t.pnl != null ? `${sign(t.pnl)}${inr(Math.abs(t.pnl))}` : "—"} {t.pnlPct != null && `(${fmtPct(t.pnlPct)})`}
-                  </td>
-                  <td style={{ textAlign: "right" }}>
-                    <button className="btn btn-sm btn-ghost" onClick={() => act(t.signalId, "sold", { exitPrice: t.ltp })}>
-                      Close
-                    </button>
-                  </td>
-                </tr>
+                <Fragment key={t.id}>
+                  <tr style={{ borderTop: "1px solid var(--border)" }}>
+                    <td style={{ padding: "11px 0", fontWeight: 600 }}>{t.symbol}</td>
+                    <td style={{ textAlign: "right", fontFamily: "var(--font-mono)" }}>{inr(t.entryPrice, 2)}</td>
+                    <td style={{ textAlign: "right", fontFamily: "var(--font-mono)" }}>{t.qty ?? "—"}</td>
+                    <td style={{ textAlign: "right", fontFamily: "var(--font-mono)" }}>{t.ltp ? t.ltp.toFixed(2) : "—"}</td>
+                    <td style={{ textAlign: "right", fontFamily: "var(--font-mono)", color: "var(--loss)" }}>{inr(t.stopLoss, 2)}</td>
+                    <td style={{ textAlign: "right", fontFamily: "var(--font-mono)", color: "var(--gain)" }}>{inr(t.target, 2)}</td>
+                    <td style={{ textAlign: "right", fontFamily: "var(--font-mono)", color: (t.pnl ?? 0) >= 0 ? "var(--gain)" : "var(--loss)" }}>
+                      {t.pnl != null ? `${sign(t.pnl)}${inr(Math.abs(t.pnl))}` : "—"} {t.pnlPct != null && `(${fmtPct(t.pnlPct)})`}
+                    </td>
+                    <td style={{ textAlign: "right" }}>
+                      <button
+                        className="btn btn-sm btn-ghost"
+                        onClick={() => {
+                          setCloseTrackId(closeTrackId === t.id ? null : t.id);
+                          setCloseTrackExit(t.ltp ? String(t.ltp) : "");
+                        }}
+                      >
+                        Close
+                      </button>
+                    </td>
+                  </tr>
+                  {closeTrackId === t.id && (
+                    <tr>
+                      <td colSpan={8}>
+                        <div className="track-form">
+                          <span style={{ fontSize: 12.5, color: "var(--text-muted)" }}>Actual exit price</span>
+                          <input value={closeTrackExit} onChange={(e) => setCloseTrackExit(e.target.value)} placeholder="₹" />
+                          <button
+                            className="btn btn-sm"
+                            style={{ background: "var(--gold)" }}
+                            onClick={() => act(t.signalId, "sold", { exitPrice: parseFloat(closeTrackExit) || t.ltp })}
+                          >
+                            Confirm close
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  )}
+                </Fragment>
               ))}
             </tbody>
           </table>
@@ -283,7 +329,7 @@ export default function SignalsPage() {
                 <option value="sell">Sell</option>
                 <option value="hold">Hold</option>
               </select>
-              <input value={bcEntry} onChange={(e) => setBcEntry(e.target.value)} placeholder="Entry ₹" />
+              <input value={bcEntry} onChange={(e) => setBcEntry(e.target.value)} placeholder="Entry ₹ (if already bought)" style={{ width: 150 }} />
               <input value={bcQty} onChange={(e) => setBcQty(e.target.value)} placeholder="Qty" />
               <input value={bcStop} onChange={(e) => setBcStop(e.target.value)} placeholder="Stop ₹" />
               <input value={bcTarget} onChange={(e) => setBcTarget(e.target.value)} placeholder="Target ₹" />
@@ -302,7 +348,7 @@ export default function SignalsPage() {
             )}
             {bcCheck.status === "idle" && (
               <p style={{ fontSize: 11.5, color: "var(--text-muted)", marginTop: 6 }}>
-                Tap "Check" to confirm the symbol before saving — Save stays disabled until it matches a real NSE stock.
+                Tap "Check" to confirm the symbol before saving — leave Entry blank to just log it as "watching" for now.
               </p>
             )}
           </div>
@@ -322,40 +368,96 @@ export default function SignalsPage() {
             </thead>
             <tbody>
               {(brokerCalls || []).map((c) => (
-                <tr key={c.id} style={{ borderTop: "1px solid var(--border)" }}>
-                  <td style={{ padding: "11px 0", fontWeight: 600 }}>
-                    {c.symbol}
-                    <div style={{ fontWeight: 400, fontSize: 11.5, color: "var(--text-muted)" }}>{c.company || ""}</div>
-                  </td>
-                  <td style={{ textAlign: "right", color: "var(--text-muted)" }}>{c.brokerName || "—"}</td>
-                  <td style={{ textAlign: "right", color: c.callType === "buy" ? "var(--gain)" : c.callType === "sell" ? "var(--loss)" : "var(--amber)" }}>
-                    {c.callType.toUpperCase()}
-                  </td>
-                  <td style={{ textAlign: "right", fontFamily: "var(--font-mono)" }}>{inr(c.entryPrice, 2)}</td>
-                  <td style={{ textAlign: "right", fontFamily: "var(--font-mono)" }}>{c.qty ?? "—"}</td>
-                  <td style={{ textAlign: "right", fontFamily: "var(--font-mono)" }}>{c.ltp ? c.ltp.toFixed(2) : "—"}</td>
-                  <td style={{ textAlign: "right", fontFamily: "var(--font-mono)", fontSize: 12 }}>
-                    <span style={{ color: "var(--loss)" }}>{inr(c.stopLoss, 0)}</span>
-                    {" / "}
-                    <span style={{ color: "var(--gain)" }}>{inr(c.target, 0)}</span>
-                  </td>
-                  <td style={{ textAlign: "right", fontFamily: "var(--font-mono)", color: (c.pnl ?? 0) >= 0 ? "var(--gain)" : "var(--loss)" }}>
-                    {c.pnl != null ? `${sign(c.pnl)}${inr(Math.abs(c.pnl))}` : "—"} {c.pnlPct != null && `(${fmtPct(c.pnlPct)})`}
-                  </td>
-                  <td style={{ textAlign: "right", textTransform: "capitalize", color: "var(--text-muted)" }}>{c.status}</td>
-                  <td style={{ textAlign: "right" }}>
-                    {c.status === "watching" && (
-                      <button className="btn btn-sm btn-ghost" onClick={() => brokerAct(c.id, "bought", { entryPrice: c.entryPrice ?? c.ltp })}>
-                        Bought?
-                      </button>
-                    )}
-                    {c.status === "bought" && (
-                      <button className="btn btn-sm btn-ghost" onClick={() => brokerAct(c.id, "sold", { exitPrice: c.ltp })}>
-                        Close
-                      </button>
-                    )}
-                  </td>
-                </tr>
+                <Fragment key={c.id}>
+                  <tr style={{ borderTop: "1px solid var(--border)" }}>
+                    <td style={{ padding: "11px 0", fontWeight: 600 }}>
+                      {c.symbol}
+                      <div style={{ fontWeight: 400, fontSize: 11.5, color: "var(--text-muted)" }}>{c.company || ""}</div>
+                    </td>
+                    <td style={{ textAlign: "right", color: "var(--text-muted)" }}>{c.brokerName || "—"}</td>
+                    <td style={{ textAlign: "right", color: c.callType === "buy" ? "var(--gain)" : c.callType === "sell" ? "var(--loss)" : "var(--amber)" }}>
+                      {c.callType.toUpperCase()}
+                    </td>
+                    <td style={{ textAlign: "right", fontFamily: "var(--font-mono)" }}>{inr(c.entryPrice, 2)}</td>
+                    <td style={{ textAlign: "right", fontFamily: "var(--font-mono)" }}>{c.qty ?? "—"}</td>
+                    <td style={{ textAlign: "right", fontFamily: "var(--font-mono)" }}>{c.ltp ? c.ltp.toFixed(2) : "—"}</td>
+                    <td style={{ textAlign: "right", fontFamily: "var(--font-mono)", fontSize: 12 }}>
+                      <span style={{ color: "var(--loss)" }}>{inr(c.stopLoss, 0)}</span>
+                      {" / "}
+                      <span style={{ color: "var(--gain)" }}>{inr(c.target, 0)}</span>
+                    </td>
+                    <td style={{ textAlign: "right", fontFamily: "var(--font-mono)", color: (c.pnl ?? 0) >= 0 ? "var(--gain)" : "var(--loss)" }}>
+                      {c.pnl != null ? `${sign(c.pnl)}${inr(Math.abs(c.pnl))}` : "—"} {c.pnlPct != null && `(${fmtPct(c.pnlPct)})`}
+                    </td>
+                    <td style={{ textAlign: "right", textTransform: "capitalize", color: "var(--text-muted)" }}>{c.status}</td>
+                    <td style={{ textAlign: "right" }}>
+                      {c.status === "watching" && (
+                        <button
+                          className="btn btn-sm btn-ghost"
+                          onClick={() => {
+                            setBcBoughtOpen(bcBoughtOpen === c.id ? null : c.id);
+                            setBcBoughtEntry(c.ltp ? String(c.ltp) : "");
+                            setBcBoughtQty(c.qty ? String(c.qty) : "");
+                          }}
+                        >
+                          Bought?
+                        </button>
+                      )}
+                      {c.status === "bought" && (
+                        <button
+                          className="btn btn-sm btn-ghost"
+                          onClick={() => {
+                            setBcCloseOpen(bcCloseOpen === c.id ? null : c.id);
+                            setBcCloseExit(c.ltp ? String(c.ltp) : "");
+                          }}
+                        >
+                          Close
+                        </button>
+                      )}
+                    </td>
+                  </tr>
+                  {bcBoughtOpen === c.id && (
+                    <tr>
+                      <td colSpan={10}>
+                        <div className="track-form">
+                          <span style={{ fontSize: 12.5, color: "var(--text-muted)" }}>Actual entry price</span>
+                          <input value={bcBoughtEntry} onChange={(e) => setBcBoughtEntry(e.target.value)} placeholder="₹" />
+                          <span style={{ fontSize: 12.5, color: "var(--text-muted)" }}>Qty</span>
+                          <input value={bcBoughtQty} onChange={(e) => setBcBoughtQty(e.target.value)} placeholder="shares" />
+                          <button
+                            className="btn btn-sm"
+                            style={{ background: "var(--gold)" }}
+                            onClick={() =>
+                              brokerAct(c.id, "bought", {
+                                entryPrice: parseFloat(bcBoughtEntry) || c.ltp,
+                                qty: parseInt(bcBoughtQty) || null,
+                              })
+                            }
+                          >
+                            Confirm bought
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  )}
+                  {bcCloseOpen === c.id && (
+                    <tr>
+                      <td colSpan={10}>
+                        <div className="track-form">
+                          <span style={{ fontSize: 12.5, color: "var(--text-muted)" }}>Actual exit price</span>
+                          <input value={bcCloseExit} onChange={(e) => setBcCloseExit(e.target.value)} placeholder="₹" />
+                          <button
+                            className="btn btn-sm"
+                            style={{ background: "var(--gold)" }}
+                            onClick={() => brokerAct(c.id, "sold", { exitPrice: parseFloat(bcCloseExit) || c.ltp })}
+                          >
+                            Confirm close
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  )}
+                </Fragment>
               ))}
             </tbody>
           </table>
@@ -363,9 +465,9 @@ export default function SignalsPage() {
       </div>
 
       <div className="chip-row">
-        {(["all", "buy", "screen", "mine"] as const).map((f) => (
+        {(["all", "buy", "screen", "mine", "calls"] as const).map((f) => (
           <button key={f} className={`chip ${filter === f ? "active" : ""}`} onClick={() => setFilter(f)}>
-            {f === "all" ? "All" : f === "buy" ? "Buy side" : f === "screen" ? "Passed screen" : "My holdings"}
+            {f === "all" ? "All" : f === "buy" ? "Buy side" : f === "screen" ? "Passed screen" : f === "mine" ? "My holdings" : "Broker calls"}
           </button>
         ))}
       </div>
@@ -404,7 +506,13 @@ export default function SignalsPage() {
                     </td>
                     <td style={{ textAlign: "right", fontFamily: "var(--font-mono)" }}>{s.valueCr ? `₹${s.valueCr.toFixed(1)}cr` : "—"}</td>
                     <td style={{ textAlign: "right", color: "var(--text-muted)" }}>{s.disclosedDate}</td>
-                    <td style={{ textAlign: "right" }}>{s.screenPassed ? <span className="tag-screen">PASS</span> : "—"}</td>
+                    <td style={{ textAlign: "right" }}>
+                      {s.screenPassed ? (
+                        <span className="tag-screen">PASS</span>
+                      ) : s.signalType === "broker_call" ? (
+                        <span className="tag-hold" style={{ background: "var(--gold-soft)", color: "var(--gold)" }}>{s.source}</span>
+                      ) : "—"}
+                    </td>
                     <td style={{ textAlign: "right", fontFamily: "var(--font-mono)", fontSize: 12 }}>
                       {s.screenPassed ? (
                         <>
@@ -412,6 +520,8 @@ export default function SignalsPage() {
                           {" / "}
                           <span style={{ color: "var(--gain)" }}>{inr(s.target, 0)}</span>
                         </>
+                      ) : s.signalType === "broker_call" && s.target ? (
+                        <span style={{ color: "var(--gain)" }}>Target {inr(s.target, 0)}</span>
                       ) : "—"}
                     </td>
                     <td style={{ textAlign: "right" }}>
@@ -442,7 +552,7 @@ export default function SignalsPage() {
                     <tr>
                       <td colSpan={9}>
                         <div className="track-form">
-                          <span style={{ fontSize: 12.5, color: "var(--text-muted)" }}>Entry price</span>
+                          <span style={{ fontSize: 12.5, color: "var(--text-muted)" }}>Actual entry price</span>
                           <input value={entryPrice} onChange={(e) => setEntryPrice(e.target.value)} placeholder="₹" />
                           <span style={{ fontSize: 12.5, color: "var(--text-muted)" }}>Qty</span>
                           <input value={qty} onChange={(e) => setQty(e.target.value)} placeholder="shares" />
@@ -458,7 +568,7 @@ export default function SignalsPage() {
                               })
                             }
                           >
-                            Confirm
+                            Confirm bought
                           </button>
                         </div>
                       </td>
@@ -472,11 +582,10 @@ export default function SignalsPage() {
       </div>
 
       <p style={{ color: "var(--text-muted)", fontSize: 11.5, marginTop: 16, lineHeight: 1.6, maxWidth: 640 }}>
-        Public bulk/block deal and insider disclosures, not investment advice. Stop-loss/target are a mechanical
-        −15% / +20% band off the disclosed price for stocks that pass the screen — not a guarantee. Broker
-        recommendations above are what you manually log from your own broker/advisor, validated against live
-        NSE prices before saving. "Bought" only logs a trade you made elsewhere; this dashboard never places
-        real orders.
+        Public bulk/block deal and insider disclosures, and public brokerage calls, are not investment advice.
+        Stop-loss/target for disclosure signals are a mechanical −15% / +20% band off the disclosed price for
+        stocks that pass the screen — not a guarantee. Entry and exit prices you enter for "Bought"/"Close" are
+        your own actual trade prices, not auto-filled — this dashboard never places real orders.
       </p>
     </div>
   );
