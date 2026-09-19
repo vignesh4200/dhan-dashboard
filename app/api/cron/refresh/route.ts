@@ -144,5 +144,47 @@ export async function GET(req: NextRequest) {
     }
   }
 
-  return NextResponse.json({ ranAt: new Date().toISOString(), results });
+  // Refresh Smart Signals' current prices too, reusing this same 15-minute
+  // pinger instead of setting up a separate schedule. Prices are the same
+  // for every user, so this runs once per invocation (not once per user
+  // like the loop above).
+  let signalsRefreshed = 0;
+  try {
+    const { data: signalRows } = await supabaseAdmin
+      .from("smart_money_signals")
+      .select("id, symbol")
+      .not("symbol", "is", null);
+
+    const symbols = Array.from(new Set((signalRows || []).map((r) => r.symbol as string)));
+    const priceMap: Record<string, number> = {};
+
+    await Promise.all(
+      symbols.map(async (sym) => {
+        try {
+          const res = await fetch(
+            `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(sym)}.NS?interval=1d&range=1d`,
+            { headers: { "User-Agent": "Mozilla/5.0" } }
+          );
+          if (!res.ok) return;
+          const data = await res.json();
+          const price = data?.chart?.result?.[0]?.meta?.regularMarketPrice;
+          if (typeof price === "number") priceMap[sym] = price;
+        } catch {}
+      })
+    );
+
+    for (const row of signalRows || []) {
+      const price = row.symbol ? priceMap[row.symbol] : undefined;
+      if (price == null) continue;
+      await supabaseAdmin
+        .from("smart_money_signals")
+        .update({ current_price: price, updated_at: new Date().toISOString() })
+        .eq("id", row.id);
+      signalsRefreshed++;
+    }
+  } catch (e: any) {
+    results.push({ signalsRefresh: false, error: e.message });
+  }
+
+  return NextResponse.json({ ranAt: new Date().toISOString(), results, signalsRefreshed });
 }
