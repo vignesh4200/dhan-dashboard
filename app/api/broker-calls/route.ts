@@ -2,29 +2,43 @@ import { NextRequest, NextResponse } from "next/server";
 import { getCurrentUser } from "@/lib/session";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 
-// Session-authed CRUD for broker/advisor trading calls the user logs
-// manually — same pattern as signal_tracks but with no underlying
-// smart_money_signals row, since these come from outside the disclosure
-// scan entirely (a broker's call, an advisor's tip, etc).
-
-async function getLtp(symbol: string): Promise<number | null> {
+async function lookupSymbol(symbol: string): Promise<{ valid: boolean; name?: string; price?: number }> {
   try {
     const res = await fetch(
       `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}.NS?interval=1d&range=1d`,
       { headers: { "User-Agent": "Mozilla/5.0" } }
     );
-    if (!res.ok) return null;
+    if (!res.ok) return { valid: false };
     const data = await res.json();
-    const price = data?.chart?.result?.[0]?.meta?.regularMarketPrice;
-    return typeof price === "number" ? price : null;
+    const result = data?.chart?.result?.[0];
+    const price = result?.meta?.regularMarketPrice;
+    if (typeof price !== "number") return { valid: false };
+    const name = result?.meta?.longName || result?.meta?.shortName || result?.meta?.symbol || symbol;
+    return { valid: true, name, price };
   } catch {
-    return null;
+    return { valid: false };
   }
 }
 
-export async function GET() {
+async function getLtp(symbol: string): Promise<number | null> {
+  const r = await lookupSymbol(symbol);
+  return r.valid ? r.price! : null;
+}
+
+export async function GET(req: NextRequest) {
   const user = await getCurrentUser();
   if (!user) return NextResponse.json({ error: "unauthenticated" }, { status: 401 });
+
+  // Live symbol check for the "Check" button in the add-call form —
+  // doesn't touch the table, just confirms the ticker resolves.
+  const checkSymbol = req.nextUrl.searchParams.get("checkSymbol");
+  if (checkSymbol) {
+    const r = await lookupSymbol(checkSymbol);
+    if (!r.valid) {
+      return NextResponse.json({ valid: false, error: `"${checkSymbol.toUpperCase()}" isn't a recognized NSE symbol.` });
+    }
+    return NextResponse.json({ valid: true, symbol: checkSymbol.toUpperCase(), name: r.name, price: r.price });
+  }
 
   const { data: calls, error } = await supabaseAdmin
     .from("broker_calls")
@@ -79,7 +93,8 @@ export async function POST(req: NextRequest) {
   const body = await req.json();
   const { id, symbol, company, brokerName, callType, entryPrice, stopLoss, target, qty, status, notes, callDate, exitPrice } = body;
 
-  // Update an existing call (status change, close-out, edits)
+  // Updating an existing call (status change, close-out, edits) — symbol is
+  // already validated from when it was created, so no re-check needed.
   if (id) {
     const patch: any = {};
     if (status !== undefined) patch.status = status;
@@ -96,15 +111,27 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ ok: true });
   }
 
-  // New call
-  if (!symbol) return NextResponse.json({ error: "symbol is required" }, { status: 400 });
+  // New call — reject unresolvable symbols server-side too, even if someone
+  // bypasses the UI's "Check" button (direct API call, bug, etc).
+  if (!symbol || !String(symbol).trim()) {
+    return NextResponse.json({ error: "symbol is required" }, { status: 400 });
+  }
+
+  const cleanSymbol = String(symbol).trim().toUpperCase();
+  const lookup = await lookupSymbol(cleanSymbol);
+  if (!lookup.valid) {
+    return NextResponse.json(
+      { error: `"${cleanSymbol}" isn't a recognized NSE trading symbol. Double-check it (e.g. RELIANCE, TCS, INFY) and try again.` },
+      { status: 400 }
+    );
+  }
 
   const { error, data } = await supabaseAdmin
     .from("broker_calls")
     .insert({
       user_id: user.id,
-      symbol: String(symbol).toUpperCase(),
-      company: company || null,
+      symbol: cleanSymbol,
+      company: company || lookup.name || null,
       broker_name: brokerName || null,
       call_type: callType || "buy",
       entry_price: entryPrice ?? null,
