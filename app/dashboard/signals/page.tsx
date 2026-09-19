@@ -76,7 +76,6 @@ export default function SignalsPage() {
   const [brokerCalls, setBrokerCalls] = useState<BrokerCall[] | null>(null);
   const [showAddCall, setShowAddCall] = useState(false);
   const [bcSymbol, setBcSymbol] = useState("");
-  const [bcCompany, setBcCompany] = useState("");
   const [bcBroker, setBcBroker] = useState("");
   const [bcType, setBcType] = useState("buy");
   const [bcEntry, setBcEntry] = useState("");
@@ -84,6 +83,7 @@ export default function SignalsPage() {
   const [bcStop, setBcStop] = useState("");
   const [bcTarget, setBcTarget] = useState("");
   const [bcNotes, setBcNotes] = useState("");
+  const [bcCheck, setBcCheck] = useState<{ status: "idle" | "checking" | "ok" | "bad"; name?: string; price?: number; error?: string }>({ status: "idle" });
 
   const loadSignals = () =>
     fetch("/api/signals").then((r) => {
@@ -116,14 +116,27 @@ export default function SignalsPage() {
     loadTracks();
   };
 
-  const submitBrokerCall = async () => {
+  const checkBcSymbol = async () => {
     if (!bcSymbol.trim()) return;
+    setBcCheck({ status: "checking" });
+    const r = await fetch(`/api/broker-calls?checkSymbol=${encodeURIComponent(bcSymbol.trim())}`).then((r) => r.json());
+    if (r.valid) setBcCheck({ status: "ok", name: r.name, price: r.price });
+    else setBcCheck({ status: "bad", error: r.error });
+  };
+
+  const resetAddCallForm = () => {
+    setBcSymbol(""); setBcBroker(""); setBcType("buy");
+    setBcEntry(""); setBcQty(""); setBcStop(""); setBcTarget(""); setBcNotes("");
+    setBcCheck({ status: "idle" });
+  };
+
+  const submitBrokerCall = async () => {
+    if (bcCheck.status !== "ok") return; // guard: symbol must be checked & valid
     await fetch("/api/broker-calls", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         symbol: bcSymbol.trim().toUpperCase(),
-        company: bcCompany.trim() || null,
         brokerName: bcBroker.trim() || null,
         callType: bcType,
         entryPrice: bcEntry ? parseFloat(bcEntry) : null,
@@ -134,8 +147,7 @@ export default function SignalsPage() {
         status: bcEntry ? "bought" : "watching",
       }),
     });
-    setBcSymbol(""); setBcCompany(""); setBcBroker(""); setBcType("buy");
-    setBcEntry(""); setBcQty(""); setBcStop(""); setBcTarget(""); setBcNotes("");
+    resetAddCallForm();
     setShowAddCall(false);
     loadBrokerCalls();
   };
@@ -237,27 +249,62 @@ export default function SignalsPage() {
               </span>
             )}
           </div>
-          <button className="btn btn-sm" style={{ background: "var(--gold)" }} onClick={() => setShowAddCall(!showAddCall)}>
+          <button
+            className="btn btn-sm"
+            style={{ background: "var(--gold)" }}
+            onClick={() => {
+              if (showAddCall) resetAddCallForm();
+              setShowAddCall(!showAddCall);
+            }}
+          >
             {showAddCall ? "Cancel" : "+ Log a call"}
           </button>
         </div>
 
         {showAddCall && (
-          <div className="track-form" style={{ marginBottom: 14 }}>
-            <input value={bcSymbol} onChange={(e) => setBcSymbol(e.target.value)} placeholder="Symbol" style={{ width: 100 }} />
-            <input value={bcCompany} onChange={(e) => setBcCompany(e.target.value)} placeholder="Company (optional)" style={{ width: 150 }} />
-            <input value={bcBroker} onChange={(e) => setBcBroker(e.target.value)} placeholder="Broker/advisor" style={{ width: 130 }} />
-            <select value={bcType} onChange={(e) => setBcType(e.target.value)} style={{ background: "var(--panel)", border: "1px solid var(--border-strong)", borderRadius: 8, padding: "7px 9px", color: "var(--text)", fontSize: 12.5 }}>
-              <option value="buy">Buy</option>
-              <option value="sell">Sell</option>
-              <option value="hold">Hold</option>
-            </select>
-            <input value={bcEntry} onChange={(e) => setBcEntry(e.target.value)} placeholder="Entry ₹" />
-            <input value={bcQty} onChange={(e) => setBcQty(e.target.value)} placeholder="Qty" />
-            <input value={bcStop} onChange={(e) => setBcStop(e.target.value)} placeholder="Stop ₹" />
-            <input value={bcTarget} onChange={(e) => setBcTarget(e.target.value)} placeholder="Target ₹" />
-            <input value={bcNotes} onChange={(e) => setBcNotes(e.target.value)} placeholder="Notes (optional)" style={{ width: 180 }} />
-            <button className="btn btn-sm" style={{ background: "var(--gain)" }} onClick={submitBrokerCall}>Save</button>
+          <div style={{ marginBottom: 14 }}>
+            <div className="track-form">
+              <input
+                value={bcSymbol}
+                onChange={(e) => { setBcSymbol(e.target.value); setBcCheck({ status: "idle" }); }}
+                placeholder="Symbol e.g. RELIANCE"
+                style={{ width: 130 }}
+              />
+              <button className="btn btn-sm btn-ghost" onClick={checkBcSymbol} disabled={bcCheck.status === "checking" || !bcSymbol.trim()}>
+                {bcCheck.status === "checking" ? "Checking…" : "Check"}
+              </button>
+              <input value={bcBroker} onChange={(e) => setBcBroker(e.target.value)} placeholder="Broker/advisor" style={{ width: 130 }} />
+              <select
+                value={bcType}
+                onChange={(e) => setBcType(e.target.value)}
+                style={{ background: "var(--panel)", border: "1px solid var(--border-strong)", borderRadius: 8, padding: "7px 9px", color: "var(--text)", fontSize: 12.5 }}
+              >
+                <option value="buy">Buy</option>
+                <option value="sell">Sell</option>
+                <option value="hold">Hold</option>
+              </select>
+              <input value={bcEntry} onChange={(e) => setBcEntry(e.target.value)} placeholder="Entry ₹" />
+              <input value={bcQty} onChange={(e) => setBcQty(e.target.value)} placeholder="Qty" />
+              <input value={bcStop} onChange={(e) => setBcStop(e.target.value)} placeholder="Stop ₹" />
+              <input value={bcTarget} onChange={(e) => setBcTarget(e.target.value)} placeholder="Target ₹" />
+              <input value={bcNotes} onChange={(e) => setBcNotes(e.target.value)} placeholder="Notes (optional)" style={{ width: 180 }} />
+              <button className="btn btn-sm" style={{ background: "var(--gain)" }} onClick={submitBrokerCall} disabled={bcCheck.status !== "ok"}>
+                Save
+              </button>
+            </div>
+            {bcCheck.status === "ok" && (
+              <p style={{ fontSize: 12, color: "var(--gain)", marginTop: 6 }}>
+                ✓ Matched: {bcCheck.name} — current price ₹{bcCheck.price?.toFixed(2)}
+              </p>
+            )}
+            {bcCheck.status === "bad" && (
+              <p style={{ fontSize: 12, color: "var(--loss)", marginTop: 6 }}>{bcCheck.error}</p>
+            )}
+            {bcCheck.status === "idle" && (
+              <p style={{ fontSize: 11.5, color: "var(--text-muted)", marginTop: 6 }}>
+                Tap "Check" to confirm the symbol before saving — Save stays disabled until it matches a real NSE stock.
+              </p>
+            )}
           </div>
         )}
 
@@ -427,8 +474,9 @@ export default function SignalsPage() {
       <p style={{ color: "var(--text-muted)", fontSize: 11.5, marginTop: 16, lineHeight: 1.6, maxWidth: 640 }}>
         Public bulk/block deal and insider disclosures, not investment advice. Stop-loss/target are a mechanical
         −15% / +20% band off the disclosed price for stocks that pass the screen — not a guarantee. Broker
-        recommendations above are what you manually log from your own broker/advisor. "Bought" only
-        logs a trade you made elsewhere; this dashboard never places real orders.
+        recommendations above are what you manually log from your own broker/advisor, validated against live
+        NSE prices before saving. "Bought" only logs a trade you made elsewhere; this dashboard never places
+        real orders.
       </p>
     </div>
   );
