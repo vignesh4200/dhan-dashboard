@@ -1,14 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 
-// Read-only symbol export, same pattern and secret as /api/public/holdings —
-// but for watchlist stocks (broker calls logged with status "watching",
-// i.e. not yet bought) rather than actual holdings. The daily Analyst Desk
-// run uses this + /api/public/holdings together to know the full set of
-// stocks to score each day.
+// Read-only symbol export, same pattern as /api/public/holdings — but for
+// watchlist stocks (broker calls logged with status "watching", i.e. not
+// yet bought). Accepts either the original holdings-export secret or a
+// separate one scoped just to the Analyst Desk's daily read.
 export async function GET(req: NextRequest) {
   const secret = req.nextUrl.searchParams.get("secret");
-  if (!process.env.HOLDINGS_EXPORT_SECRET || secret !== process.env.HOLDINGS_EXPORT_SECRET) {
+  if (secret !== process.env.HOLDINGS_EXPORT_SECRET && secret !== process.env.ANALYST_DESK_READ_SECRET) {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
 
