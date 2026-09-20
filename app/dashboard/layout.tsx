@@ -30,6 +30,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
     { href: "/dashboard/gold", label: "Gold" },
     { href: "/dashboard/dividends", label: "Dividends" },
     { href: "/dashboard/signals", label: "Smart Signals" },
+    { href: "/dashboard/analyst-desk", label: "Analyst Desk" },
     { href: "/dashboard/orders", label: "Orders" },
     { href: "/dashboard/alerts", label: "Alerts" },
     { href: "/settings", label: "Settings" },
