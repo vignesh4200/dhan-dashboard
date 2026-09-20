@@ -18,7 +18,7 @@ import { supabaseAdmin } from "@/lib/supabaseAdmin";
 // user they belong to. If that's ever not true, this route has a bug.
 export async function GET(req: NextRequest) {
   const secret = req.nextUrl.searchParams.get("secret");
-  if (!process.env.HOLDINGS_EXPORT_SECRET || secret !== process.env.HOLDINGS_EXPORT_SECRET) {
+if (secret !== process.env.HOLDINGS_EXPORT_SECRET && secret !== process.env.ANALYST_DESK_READ_SECRET) {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
  
