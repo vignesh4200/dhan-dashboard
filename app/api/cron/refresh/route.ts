@@ -6,6 +6,7 @@ import { getSectorsForHoldings } from "@/lib/yahoo-profile";
 import { generateTotpCode } from "@/lib/totp";
 import { computeHolding, tierFor, alertMessage } from "@/lib/alerts";
 import { sendWhatsAppAlert, isWhatsAppConfigured } from "@/lib/whatsapp";
+import { runDividendAutoLog } from "@/lib/dividend-auto-log";
 
 // Called every 15 minutes by an external cron pinger (e.g. cron-job.org) hitting:
 //   GET https://your-app.vercel.app/api/cron/refresh?secret=YOUR_CRON_SECRET
@@ -186,5 +187,18 @@ export async function GET(req: NextRequest) {
     results.push({ signalsRefresh: false, error: e.message });
   }
 
-  return NextResponse.json({ ranAt: new Date().toISOString(), results, signalsRefreshed });
+  // Flip dividends from "Upcoming" to "Received" once their record date has
+  // passed. This used to live only behind the separate /api/cron/dividend-
+  // auto-log route, which nothing was ever scheduled to call — so
+  // dividends never got logged no matter how long past their record date.
+  // Reusing this 15-minute pinger (rather than a fourth cron-job.org job)
+  // keeps it running automatically.
+  let dividendAutoLogResults: any[] = [];
+  try {
+    dividendAutoLogResults = await runDividendAutoLog();
+  } catch (e: any) {
+    results.push({ dividendAutoLog: false, error: e.message });
+  }
+
+  return NextResponse.json({ ranAt: new Date().toISOString(), results, signalsRefreshed, dividendAutoLogResults });
 }
