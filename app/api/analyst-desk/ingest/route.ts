@@ -57,13 +57,13 @@ export async function GET(req: NextRequest) {
   }
 
   // GET .../ingest?secret=...&row=<base64-encoded JSON of ONE row object>
-  //   — the real daily scheduled-task run uses THIS, not the POST endpoint
-  //   above. Scheduled-task sandboxes can't reach this app via curl/Bash
-  //   (their shell's egress proxy blocks it — confirmed 403), only via the
-  //   WebFetch-style tool, which is GET-only. So instead of one POST with a
-  //   `rows` array, the agent calls this once per stock with that stock's
-  //   row JSON, base64-encoded, in a single `row` query param. Same
-  //   ingestAnalystDeskRows() upsert logic underneath either way.
+  //   — LEGACY / NOT RELIABLE. This was the first attempt at a GET-only
+  //   ingest path, but real-world testing (2026-09-21) showed the WebFetch
+  //   proxy this app's scheduled-task agents use does NOT reliably handle
+  //   long URLs: short ones work, but past some length it can silently
+  //   no-op (return stale/cached content instead of erroring) rather than
+  //   cleanly failing. That makes it unsafe for anything with real prose in
+  //   it. Kept only for backward compat — use &sym=... below instead.
   if (req.nextUrl.searchParams.get("row")) {
     let row: any;
     try {
@@ -71,6 +71,85 @@ export async function GET(req: NextRequest) {
     } catch {
       return NextResponse.json({ error: "row must be base64-encoded JSON of one row object" }, { status: 400 });
     }
+    const result = await ingestAnalystDeskRows([row]);
+    return NextResponse.json(result.body, { status: result.status });
+  }
+
+  // GET .../ingest?secret=...&sym=RELIANCE&dt=2026-09-21&cs=61.4&cl=M
+  //     &es=65&ms=58&vs=60[&fl=1&fr=...][&co=...][&fw=...][&se=...]
+  //     [&f1=...][&f2=...][&f3=...]
+  //   — THE REAL PATH, one short GET call per stock. Confirmed short GETs
+  //   (well under ~170 chars total) reach this app reliably; long ones
+  //   don't, so this mode never asks the agent to send prose. Required:
+  //   sym, dt (YYYY-MM-DD), cs (compositeScore), cl (S|M|N|W|C for
+  //   Strong|Moderate|Neutral|Weak|Concern), es, ms, vs (0-100 scores).
+  //   Optional, keep each SHORT (under ~60 chars, URL-encoded): co
+  //   (company name), fw (flow/derivatives one-liner), se (sentiment
+  //   one-liner), fr (flag reason, implies flagged=true), f1/f2/f3 (up to
+  //   3 short "Analyst: finding" one-liners). The full reportMarkdown the
+  //   dashboard shows is generated HERE, server-side, from these fields —
+  //   the agent never has to transmit long text at all.
+  const sym = req.nextUrl.searchParams.get("sym");
+  if (sym) {
+    const dt = req.nextUrl.searchParams.get("dt");
+    const cs = req.nextUrl.searchParams.get("cs");
+    const cl = req.nextUrl.searchParams.get("cl");
+    const es = req.nextUrl.searchParams.get("es");
+    const ms = req.nextUrl.searchParams.get("ms");
+    const vs = req.nextUrl.searchParams.get("vs");
+    if (!dt || !cs || !cl || !es || !ms || !vs) {
+      return NextResponse.json(
+        { error: "compact mode requires sym, dt, cs, cl, es, ms, vs" },
+        { status: 400 }
+      );
+    }
+    const CL_MAP: Record<string, string> = { S: "Strong", M: "Moderate", N: "Neutral", W: "Weak", C: "Concern" };
+    const convictionLabel = CL_MAP[cl.toUpperCase()] || null;
+    const co = req.nextUrl.searchParams.get("co");
+    const fw = req.nextUrl.searchParams.get("fw");
+    const se = req.nextUrl.searchParams.get("se");
+    const fr = req.nextUrl.searchParams.get("fr");
+    const findings = ["f1", "f2", "f3"]
+      .map((k) => req.nextUrl.searchParams.get(k))
+      .filter((v): v is string => !!v)
+      .map((v) => {
+        const [head, ...rest] = v.split(":");
+        return rest.length > 0
+          ? { lead: "", analyst: head.trim(), finding: rest.join(":").trim() }
+          : { lead: "", analyst: "", finding: v };
+      });
+
+    const compositeScore = Number(cs);
+    const reportMarkdown =
+      `# ${co || sym} (${sym.toUpperCase()})\n\n` +
+      `**Composite: ${compositeScore.toFixed(1)} — ${convictionLabel || cl}**\n\n` +
+      `**Equity Research score:** ${es}/100\n` +
+      `**Industry & Macro score:** ${ms}/100\n` +
+      `**Independent Validation score:** ${vs}/100\n` +
+      (fw ? `\n**Flow/Derivatives:** ${fw}\n` : "") +
+      (se ? `**News/Sentiment:** ${se}\n` : "") +
+      (fr ? `\n**Flag:** ${fr}\n` : "") +
+      (findings.length > 0
+        ? `\n**Findings:**\n` + findings.map((f) => `- ${f.analyst ? f.analyst + ": " : ""}${f.finding}`).join("\n")
+        : "");
+
+    const row = {
+      runDate: dt,
+      symbol: sym,
+      company: co || null,
+      compositeScore,
+      convictionLabel,
+      equityScore: Number(es),
+      macroScore: Number(ms),
+      validationScore: Number(vs),
+      flowRead: fw || null,
+      sentimentRead: se || null,
+      flagged: !!fr,
+      flagReason: fr || null,
+      findings,
+      reportMarkdown,
+      sources: [],
+    };
     const result = await ingestAnalystDeskRows([row]);
     return NextResponse.json(result.body, { status: result.status });
   }
