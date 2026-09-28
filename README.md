@@ -165,7 +165,8 @@ One-time setup:
    - Network access → Custom → add `dhan-dashboardnn.vercel.app` (keep the
      default list ticked).
    - Environment variables → `ANALYST_DESK_INGEST_SECRET=<same value as in Vercel>`.
-3. Optional, so reports start by themselves: on the routine, Add another
-   trigger → API, copy the URL and generate a token, then add them to Vercel
-   as `DESK_ROUTINE_FIRE_URL` and `DESK_ROUTINE_TOKEN`. Without these,
-   requests wait in the queue until you click Run now on the routine.
+3. So reports start by themselves: on the routine, Add another trigger → API
+   → Generate token, then add it to Vercel as `DESK_ROUTINE_TOKEN`. The Fire
+   URL is built in (override with `DESK_ROUTINE_FIRE_URL` for a different
+   routine). Without the token, requests wait in the queue until you click
+   Run now on the routine.
