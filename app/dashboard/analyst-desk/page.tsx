@@ -1,6 +1,7 @@
 "use client";
 import { Fragment, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
+import DeskReports from "./DeskReports";
 
 type Finding = { lead: string; analyst: string; finding: string; isFlag?: boolean };
 
@@ -70,21 +71,20 @@ export default function AnalystDeskPage() {
     <div>
       <div style={{ fontFamily: "var(--font-display)", fontSize: 22, fontWeight: 600, marginBottom: 4 }}>Analyst Desk</div>
       <div style={{ color: "var(--text-muted)", fontSize: 13, marginBottom: 20 }}>
-        Every holding + watchlist stock, scored fundamentals-first (earnings quality + margin of safety) · flow &amp;
-        sentiment shown as context, never blended into the score · refreshed once daily, pre-market
-        {runDate && <> · last run {runDate}</>}
+        On-demand research memos for the stocks you choose, each ending in a clear decision.
       </div>
 
-      {stocks.length === 0 ? (
-        <div className="list-card">
-          <p>No desk run yet.</p>
-          <p style={{ color: "var(--text-muted)", fontSize: 13 }}>
-            Nothing has been ingested into <code>analyst_desk_scores</code> yet — once the daily scheduled task
-            starts posting to <code>/api/analyst-desk/ingest</code>, stocks will show up here automatically.
-          </p>
-        </div>
-      ) : (
+      <DeskReports />
+
+      {stocks.length === 0 ? null : (
         <>
+          <div style={{ fontFamily: "var(--font-display)", fontSize: 16, fontWeight: 600, marginBottom: 4 }}>
+            Earlier scheduled scores
+          </div>
+          <div style={{ color: "var(--text-muted)", fontSize: 12.5, marginBottom: 16 }}>
+            From the daily scheduled desk (now paused) · scored fundamentals-first, flow &amp; sentiment shown as context
+            {runDate && <> · last run {runDate}</>}
+          </div>
           <div className="stat-grid" style={{ marginBottom: 22 }}>
             <div className="stat-card">
               <div className="stat-label">Stocks tracked</div>

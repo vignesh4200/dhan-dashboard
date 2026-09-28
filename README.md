@@ -141,3 +141,31 @@ The Research tab pulls quotes and company news via a self-hosted OpenBB Open Dat
    - `OPENBB_API_URL` — the base URL of your deployed ODP server
    - `OPENBB_API_KEY` — optional, only if your deployment requires a bearer token
 3. Redeploy. The Research tab in the sidebar will start showing data once it can reach your server.
+
+## Analyst Desk — on-demand reports
+
+The Analyst Desk page (`/dashboard/analyst-desk`) lets you pick stocks from your
+holdings, your Smart Signals watchlist, or any NSE symbol you type. Each one
+gets an investment-committee memo that ends in a Buy / Accumulate / Hold /
+Avoid / Sell decision.
+
+The research runs on your claude.ai subscription through a Claude Code
+routine ("Analyst Desk — on-demand reports" at claude.ai/code/routines), so
+there's no API bill:
+
+page → queues rows in `analyst_desk_reports` → pokes the routine →
+routine claims them (`POST /api/analyst-desk/reports/queue`) → researches →
+posts memos (`POST /api/analyst-desk/reports/ingest`).
+
+One-time setup:
+
+1. Supabase SQL Editor → run `sql/analyst_desk_reports.sql`.
+2. The routine's cloud environment (claude.ai/code/routines → the routine →
+   Edit → environment → settings):
+   - Network access → Custom → add `dhan-dashboardnn.vercel.app` (keep the
+     default list ticked).
+   - Environment variables → `ANALYST_DESK_INGEST_SECRET=<same value as in Vercel>`.
+3. Optional, so reports start by themselves: on the routine, Add another
+   trigger → API, copy the URL and generate a token, then add them to Vercel
+   as `DESK_ROUTINE_FIRE_URL` and `DESK_ROUTINE_TOKEN`. Without these,
+   requests wait in the queue until you click Run now on the routine.

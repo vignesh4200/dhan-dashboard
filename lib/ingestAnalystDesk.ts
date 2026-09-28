@@ -1,6 +1,6 @@
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 
-async function isValidNseSymbol(symbol: string): Promise<boolean> {
+export async function isValidNseSymbol(symbol: string): Promise<boolean> {
   try {
     const res = await fetch(
       `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}.NS?interval=1d&range=1d`,
