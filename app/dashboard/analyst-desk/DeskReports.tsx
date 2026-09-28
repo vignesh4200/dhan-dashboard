@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import Markdown from "./Markdown";
 
@@ -7,7 +7,7 @@ type Report = {
   id: number;
   symbol: string;
   company: string | null;
-  status: "running" | "done" | "error";
+  status: "queued" | "running" | "done" | "error";
   decision: string | null;
   conviction: number | null;
   currentPrice: number | null;
@@ -17,17 +17,16 @@ type Report = {
   summary: string | null;
   reportMarkdown: string | null;
   sources: string[];
-  model: string | null;
   error: string | null;
   createdAt: string;
+  claimedAt: string | null;
   completedAt: string | null;
 };
 
-type Pending = { symbol: string; startedAt: number; error?: string };
-
-const CONCURRENCY = 2;
-// A run the server never finished (function timeout, redeploy) stays 'running'.
-const STALE_MS = 6 * 60 * 1000;
+// How often to re-check while reports are queued or being researched.
+const POLL_MS = 20 * 1000;
+// The routine re-claims a 'running' row after an hour, so past that it's stuck.
+const STALE_MS = 70 * 60 * 1000;
 
 const decisionStyle = (d: string | null) => {
   if (d === "BUY" || d === "ACCUMULATE") return { background: "var(--gain-soft)", color: "var(--gain)" };
@@ -49,41 +48,48 @@ export default function DeskReports() {
   const router = useRouter();
   const [reports, setReports] = useState<Report[] | null>(null);
   const [suggestions, setSuggestions] = useState<{ holdings: string[]; watchlist: string[] }>({ holdings: [], watchlist: [] });
-  const [configured, setConfigured] = useState(true);
+  const [routineConfigured, setRoutineConfigured] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
   const [selected, setSelected] = useState<string[]>([]);
   const [input, setInput] = useState("");
-  const [pending, setPending] = useState<Pending[]>([]);
+  const [submitting, setSubmitting] = useState(false);
   const [openId, setOpenId] = useState<number | null>(null);
-  const [, setTick] = useState(0);
-  const queue = useRef<string[]>([]);
-  const active = useRef(0);
+  const seenDone = useRef<Set<number> | null>(null);
 
-  useEffect(() => {
-    fetch("/api/analyst-desk/reports")
-      .then((r) => {
-        if (r.status === 401) {
-          router.push("/login");
-          return null;
-        }
-        return r.json();
-      })
-      .then((d) => {
-        if (!d) return;
-        if (d.error) return setLoadError(d.error);
-        setReports(d.reports || []);
-        setSuggestions(d.suggestions || { holdings: [], watchlist: [] });
-        setConfigured(d.configured !== false);
-      })
-      .catch((e) => setLoadError(String(e)));
+  const load = useCallback(async () => {
+    try {
+      const r = await fetch("/api/analyst-desk/reports");
+      if (r.status === 401) return router.push("/login");
+      const d = await r.json();
+      if (d.error) return setLoadError(d.error);
+      setLoadError(null);
+      const list: Report[] = d.reports || [];
+      // Auto-open a report that just finished while you were watching.
+      const done = list.filter((x) => x.status === "done").map((x) => x.id);
+      if (seenDone.current) {
+        const fresh = done.find((id) => !seenDone.current!.has(id));
+        if (fresh != null) setOpenId(fresh);
+      }
+      seenDone.current = new Set(done);
+      setReports(list);
+      setSuggestions(d.suggestions || { holdings: [], watchlist: [] });
+      setRoutineConfigured(d.routineConfigured !== false);
+    } catch (e) {
+      setLoadError(String(e));
+    }
   }, [router]);
 
-  // Re-render every second so elapsed timers move while reports run.
   useEffect(() => {
-    if (pending.every((p) => p.error)) return;
-    const t = setInterval(() => setTick((n) => n + 1), 1000);
+    load();
+  }, [load]);
+
+  const inFlight = (reports || []).some((r) => r.status === "queued" || r.status === "running");
+  useEffect(() => {
+    if (!inFlight) return;
+    const t = setInterval(load, POLL_MS);
     return () => clearInterval(t);
-  }, [pending]);
+  }, [inFlight, load]);
 
   const toggle = (s: string) => setSelected((cur) => (cur.includes(s) ? cur.filter((x) => x !== s) : [...cur, s]));
 
@@ -97,51 +103,37 @@ export default function DeskReports() {
     setInput("");
   };
 
-  const runOne = async (symbol: string) => {
-    active.current++;
+  const generate = async (symbols: string[]) => {
+    if (symbols.length === 0) return;
+    setSubmitting(true);
+    setNotice(null);
     try {
       const res = await fetch("/api/analyst-desk/reports", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ symbol }),
+        body: JSON.stringify({ symbols }),
       });
       const d = await res.json().catch(() => ({}));
-      if (d.report) {
-        setReports((cur) => [d.report, ...(cur || []).filter((r) => r.id !== d.report.id)]);
-        if (d.report.status === "done") setOpenId(d.report.id);
+      if (!res.ok) {
+        setNotice(d.error || `request failed (${res.status})`);
+        return;
       }
-      if (res.ok) {
-        setPending((cur) => cur.filter((p) => p.symbol !== symbol));
-      } else {
-        const msg = d.report?.error || d.error || `request failed (${res.status})`;
-        setPending((cur) => cur.map((p) => (p.symbol === symbol ? { ...p, error: msg } : p)));
+      const parts: string[] = [];
+      if (d.queued?.length) {
+        parts.push(
+          d.fired
+            ? `Queued ${d.queued.length} — the desk has started. Reports usually land in 5–15 minutes; this page updates by itself.`
+            : `Queued ${d.queued.length}, but the routine couldn't be started automatically${d.fireError ? ` (${d.fireError})` : ""}. Open claude.ai/code/routines and click Run now on “Analyst Desk — on-demand reports”.`
+        );
       }
-    } catch (e: any) {
-      setPending((cur) =>
-        cur.map((p) => (p.symbol === symbol ? { ...p, error: "connection dropped — the report may still finish; reload in a few minutes" } : p))
-      );
+      if (d.skipped?.alreadyQueued?.length) parts.push(`Already in progress: ${d.skipped.alreadyQueued.join(", ")}.`);
+      if (d.skipped?.invalid?.length) parts.push(`Not found on NSE: ${d.skipped.invalid.join(", ")}.`);
+      setNotice(parts.join(" "));
+      setSelected([]);
+      await load();
     } finally {
-      active.current--;
-      pump();
+      setSubmitting(false);
     }
-  };
-
-  const pump = () => {
-    while (active.current < CONCURRENCY && queue.current.length > 0) {
-      const next = queue.current.shift()!;
-      setPending((cur) => cur.map((p) => (p.symbol === next ? { ...p, startedAt: Date.now() } : p)));
-      runOne(next);
-    }
-  };
-
-  const generate = (symbols: string[]) => {
-    const running = new Set(pending.filter((p) => !p.error).map((p) => p.symbol));
-    const fresh = symbols.filter((s) => !running.has(s));
-    if (fresh.length === 0) return;
-    setPending((cur) => [...cur.filter((p) => !fresh.includes(p.symbol)), ...fresh.map((symbol) => ({ symbol, startedAt: 0 }))]);
-    queue.current.push(...fresh);
-    setSelected([]);
-    pump();
   };
 
   const remove = async (id: number) => {
@@ -156,9 +148,7 @@ export default function DeskReports() {
     </button>
   );
 
-  const visibleReports = (reports || []).filter(
-    (r) => !(r.status === "running" && pending.some((p) => p.symbol === r.symbol && !p.error))
-  );
+  const visibleReports = reports || [];
 
   return (
     <div style={{ marginBottom: 32 }}>
@@ -168,13 +158,14 @@ export default function DeskReports() {
         </div>
         <div style={{ color: "var(--text-muted)", fontSize: 12.5, marginBottom: 14, lineHeight: 1.6 }}>
           Pick the stocks you want researched. The desk reads the latest filings, results, valuation and news, then writes
-          an investment-committee memo that ends in a Buy / Accumulate / Hold / Avoid / Sell decision. Each report takes
-          about 2–4 minutes.
+          an investment-committee memo that ends in a Buy / Accumulate / Hold / Avoid / Sell decision. Runs on your Claude
+          subscription through a Claude Code routine; a batch usually takes 5–15 minutes.
         </div>
 
-        {!configured && (
-          <div className="auth-error">
-            ANTHROPIC_API_KEY isn&apos;t set in the environment, so reports can&apos;t be generated yet.
+        {!routineConfigured && (
+          <div className="auth-note" style={{ marginTop: 0, marginBottom: 12 }}>
+            Auto-start isn&apos;t set up yet (DESK_ROUTINE_FIRE_URL / DESK_ROUTINE_TOKEN). Requests will wait in the queue
+            until you click Run now on the routine at claude.ai/code/routines.
           </div>
         )}
         {loadError && <div className="auth-error">{loadError}</div>}
@@ -209,11 +200,11 @@ export default function DeskReports() {
         <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
           <button
             className="btn btn-sm"
-            disabled={selected.length === 0 || !configured}
-            style={{ opacity: selected.length === 0 || !configured ? 0.5 : 1 }}
+            disabled={selected.length === 0 || submitting}
+            style={{ opacity: selected.length === 0 || submitting ? 0.5 : 1 }}
             onClick={() => generate(selected)}
           >
-            Generate {selected.length > 0 ? `${selected.length} report${selected.length > 1 ? "s" : ""}` : "reports"}
+            {submitting ? "Queuing…" : "Generate"} {selected.length > 0 ? `${selected.length} report${selected.length > 1 ? "s" : ""}` : "reports"}
           </button>
           {selected.length > 0 && (
             <>
@@ -224,38 +215,8 @@ export default function DeskReports() {
             </>
           )}
         </div>
+        {notice && <div className="auth-note">{notice}</div>}
       </div>
-
-      {pending.length > 0 && (
-        <div className="list-card" style={{ marginBottom: 18 }}>
-          <div className="list-title" style={{ marginBottom: 10 }}>
-            In progress
-          </div>
-          {pending.map((p) => (
-            <div
-              key={p.symbol}
-              style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "8px 0", borderTop: "1px solid var(--border)", fontSize: 13 }}
-            >
-              <b>{p.symbol}</b>
-              {p.error ? (
-                <span style={{ display: "flex", gap: 10, alignItems: "center" }}>
-                  <span style={{ color: "var(--loss)", fontSize: 12 }}>{p.error}</span>
-                  <button className="btn btn-sm btn-ghost" onClick={() => generate([p.symbol])}>
-                    Retry
-                  </button>
-                  <button className="btn btn-sm btn-ghost" onClick={() => setPending((cur) => cur.filter((x) => x.symbol !== p.symbol))}>
-                    Dismiss
-                  </button>
-                </span>
-              ) : (
-                <span style={{ color: "var(--text-muted)", fontSize: 12, fontFamily: "var(--font-mono)" }}>
-                  {p.startedAt ? `Researching… ${Math.floor((Date.now() - p.startedAt) / 1000)}s` : "Queued"}
-                </span>
-              )}
-            </div>
-          ))}
-        </div>
-      )}
 
       <div className="list-card">
         <div className="list-title" style={{ marginBottom: 10 }}>
@@ -267,7 +228,7 @@ export default function DeskReports() {
           <div style={{ color: "var(--text-muted)", fontSize: 13 }}>No reports yet — pick a stock above to get started.</div>
         ) : (
           visibleReports.map((r) => {
-            const stale = r.status === "running" && Date.now() - new Date(r.createdAt).getTime() > STALE_MS;
+            const stale = r.status === "running" && Date.now() - new Date(r.claimedAt || r.createdAt).getTime() > STALE_MS;
             const open = openId === r.id;
             return (
               <div key={r.id} style={{ borderTop: "1px solid var(--border)", padding: "12px 0" }}>
@@ -291,6 +252,7 @@ export default function DeskReports() {
                     </span>
                   )}
                   {r.status === "error" && <span style={{ color: "var(--loss)", fontSize: 12 }}>Failed: {r.error}</span>}
+                  {r.status === "queued" && <span style={{ color: "var(--text-muted)", fontSize: 12 }}>Queued — waiting for the desk</span>}
                   {r.status === "running" && (
                     <span style={{ color: "var(--text-muted)", fontSize: 12 }}>{stale ? "Didn't finish — try again" : "Researching…"}</span>
                   )}
@@ -303,7 +265,7 @@ export default function DeskReports() {
                         {open ? "Hide" : "Read"}
                       </button>
                     )}
-                    {(r.status !== "running" || stale) && (
+                    {(r.status === "done" || r.status === "error" || stale) && (
                       <button className="btn btn-sm btn-ghost" onClick={() => generate([r.symbol])} title="Generate a fresh report">
                         Refresh
                       </button>

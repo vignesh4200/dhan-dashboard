@@ -2,36 +2,12 @@ import { NextRequest, NextResponse } from "next/server";
 import { getCurrentUser } from "@/lib/session";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import { isValidNseSymbol } from "@/lib/ingestAnalystDesk";
-import { generateDeskReport } from "@/lib/generateDeskReport";
+import { fireDeskRoutine, routineConfigured, toReport } from "@/lib/deskReports";
 
-// On-demand Analyst Desk reports. You pick the stocks on /dashboard/analyst-desk;
-// each POST researches one stock with Claude + web search and stores an
-// investment-committee memo in analyst_desk_reports (sql/analyst_desk_reports.sql).
-//
-// Needs ANTHROPIC_API_KEY in Vercel's Environment Variables. A report takes a
-// few minutes, so this route asks for Vercel's 300s function limit.
-export const maxDuration = 300;
+// On-demand Analyst Desk reports for the logged-in user. You pick stocks on
+// /dashboard/analyst-desk; POST queues them and pokes the Claude Code routine,
+// which writes the memos back through ./ingest. See lib/deskReports.ts.
 export const dynamic = "force-dynamic";
-
-const toReport = (r: any) => ({
-  id: r.id,
-  symbol: r.symbol,
-  company: r.company,
-  status: r.status,
-  decision: r.decision,
-  conviction: r.conviction,
-  currentPrice: r.current_price,
-  fairValueLow: r.fair_value_low,
-  fairValueHigh: r.fair_value_high,
-  horizon: r.horizon,
-  summary: r.summary,
-  reportMarkdown: r.report_markdown,
-  sources: r.sources || [],
-  model: r.model,
-  error: r.error,
-  createdAt: r.created_at,
-  completedAt: r.completed_at,
-});
 
 async function latestHoldings(userId: string): Promise<any[]> {
   const { data: snap } = await supabaseAdmin
@@ -44,7 +20,7 @@ async function latestHoldings(userId: string): Promise<any[]> {
   return snap?.holdings || [];
 }
 
-// GET — your past reports plus symbol suggestions (holdings + Smart Signals).
+// GET — your reports plus symbol suggestions (holdings + Smart Signals).
 export async function GET() {
   const user = await getCurrentUser();
   if (!user) return NextResponse.json({ error: "unauthenticated" }, { status: 401 });
@@ -71,85 +47,57 @@ export async function GET() {
   return NextResponse.json({
     reports: (reports || []).map(toReport),
     suggestions: { holdings: holdingSymbols, watchlist: watchlistSymbols },
-    configured: !!process.env.ANTHROPIC_API_KEY,
+    routineConfigured: routineConfigured(),
   });
 }
 
-// POST { symbol } — research one stock and store the memo.
+// POST { symbols: string[] } — queue reports and poke the routine.
 export async function POST(req: NextRequest) {
   const user = await getCurrentUser();
   if (!user) return NextResponse.json({ error: "unauthenticated" }, { status: 401 });
-  if (!process.env.ANTHROPIC_API_KEY) {
-    return NextResponse.json({ error: "ANTHROPIC_API_KEY is not set in the environment" }, { status: 500 });
-  }
 
   const body = await req.json().catch(() => null);
-  const symbol = String(body?.symbol || "").trim().toUpperCase();
-  if (!/^[A-Z0-9&\-]{1,20}$/.test(symbol)) {
-    return NextResponse.json({ error: "enter a valid NSE symbol" }, { status: 400 });
-  }
-  if (!(await isValidNseSymbol(symbol))) {
-    return NextResponse.json({ error: `${symbol} did not resolve to a listed NSE stock` }, { status: 400 });
-  }
+  const requested: string[] = Array.from(
+    new Set(
+      (Array.isArray(body?.symbols) ? body.symbols : [])
+        .map((s: any) => String(s || "").trim().toUpperCase())
+        .filter((s: string) => /^[A-Z0-9&\-]{1,20}$/.test(s))
+    )
+  ).slice(0, 10) as string[];
+  if (requested.length === 0) return NextResponse.json({ error: "pick at least one NSE symbol" }, { status: 400 });
 
-  const [holdings, { data: call }] = await Promise.all([
-    latestHoldings(user.id),
-    supabaseAdmin
-      .from("broker_calls")
-      .select("broker_name, call_type")
-      .eq("user_id", user.id)
-      .eq("symbol", symbol)
-      .limit(1)
-      .maybeSingle(),
-  ]);
-  const holding = holdings.find((h: any) => String(h.symbol).toUpperCase() === symbol);
-
-  const { data: row, error: insertErr } = await supabaseAdmin
+  // Don't queue a second copy of something already waiting or in progress.
+  const { data: open } = await supabaseAdmin
     .from("analyst_desk_reports")
-    .insert({ user_id: user.id, symbol, status: "running" })
-    .select("*")
-    .single();
-  if (insertErr || !row) {
-    return NextResponse.json({ error: insertErr?.message || "could not create report" }, { status: 500 });
+    .select("symbol")
+    .eq("user_id", user.id)
+    .in("status", ["queued", "running"])
+    .in("symbol", requested);
+  const alreadyOpen = new Set((open || []).map((r: any) => r.symbol));
+
+  const candidates = requested.filter((s) => !alreadyOpen.has(s));
+  const validity = await Promise.all(candidates.map((s) => isValidNseSymbol(s)));
+  const invalid = candidates.filter((_, i) => !validity[i]);
+  const toQueue = candidates.filter((_, i) => validity[i]);
+
+  let queued: any[] = [];
+  if (toQueue.length > 0) {
+    const { data, error } = await supabaseAdmin
+      .from("analyst_desk_reports")
+      .insert(toQueue.map((symbol) => ({ user_id: user.id, symbol, status: "queued" })))
+      .select("*");
+    if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+    queued = data || [];
   }
 
-  let update: Record<string, any>;
-  try {
-    const r = await generateDeskReport({
-      symbol,
-      inHoldings: !!holding,
-      holdingQty: holding?.qty ?? null,
-      avgCost: holding?.avg ?? null,
-      brokerRec: call ? { brokerName: call.broker_name, callType: call.call_type } : null,
-    });
-    update = {
-      status: "done",
-      company: r.company,
-      decision: r.decision,
-      conviction: r.conviction,
-      current_price: r.currentPrice,
-      fair_value_low: r.fairValueLow,
-      fair_value_high: r.fairValueHigh,
-      horizon: r.horizon,
-      summary: r.summary,
-      report_markdown: r.reportMarkdown,
-      sources: r.sources,
-      model: r.model,
-      completed_at: new Date().toISOString(),
-    };
-  } catch (e: any) {
-    update = { status: "error", error: String(e?.message || e).slice(0, 500), completed_at: new Date().toISOString() };
-  }
+  const fire = queued.length > 0 ? await fireDeskRoutine(toQueue) : { fired: false };
 
-  const { data: saved } = await supabaseAdmin
-    .from("analyst_desk_reports")
-    .update(update)
-    .eq("id", row.id)
-    .select("*")
-    .single();
-
-  const report = toReport(saved || { ...row, ...update });
-  return NextResponse.json({ report }, { status: report.status === "error" ? 502 : 200 });
+  return NextResponse.json({
+    queued: queued.map(toReport),
+    skipped: { alreadyQueued: Array.from(alreadyOpen), invalid },
+    fired: fire.fired,
+    fireError: "error" in fire ? fire.error : undefined,
+  });
 }
 
 // DELETE ?id= — remove one of your reports.
