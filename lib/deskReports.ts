@@ -23,6 +23,7 @@ export const toReport = (r: any) => ({
   reportMarkdown: r.report_markdown,
   sources: r.sources || [],
   error: r.error,
+  fireNote: r.fire_note,
   createdAt: r.created_at,
   claimedAt: r.claimed_at,
   completedAt: r.completed_at,
@@ -30,26 +31,40 @@ export const toReport = (r: any) => ({
 
 // Routine API trigger. DESK_ROUTINE_FIRE_URL is the routine's /fire URL and
 // DESK_ROUTINE_TOKEN the bearer token, both from claude.ai/code/routines →
-// the routine → Edit → Add another trigger → API.
-export const routineConfigured = () => !!(process.env.DESK_ROUTINE_FIRE_URL && process.env.DESK_ROUTINE_TOKEN);
+// the routine → Edit → Add another trigger → API. Values are trimmed and
+// stripped of surrounding quotes, which a copy-paste into Vercel often adds.
+const envValue = (name: string) => (process.env[name] || "").trim().replace(/^["']|["']$/g, "").trim();
+
+export const routineMissing = () =>
+  ["DESK_ROUTINE_FIRE_URL", "DESK_ROUTINE_TOKEN"].filter((name) => !envValue(name));
+
+export const routineConfigured = () => routineMissing().length === 0;
 
 export async function fireDeskRoutine(symbols: string[]): Promise<{ fired: boolean; error?: string }> {
-  if (!routineConfigured()) return { fired: false, error: "routine trigger not configured" };
+  const missing = routineMissing();
+  if (missing.length > 0) return { fired: false, error: `not set on this deployment: ${missing.join(", ")}` };
+  const url = envValue("DESK_ROUTINE_FIRE_URL");
+  if (!/^https:\/\/api\.anthropic\.com\/.+\/fire$/.test(url)) {
+    return { fired: false, error: "DESK_ROUTINE_FIRE_URL should be the routine's Fire URL, ending in /fire" };
+  }
   try {
-    const res = await fetch(process.env.DESK_ROUTINE_FIRE_URL!, {
+    const res = await fetch(url, {
       method: "POST",
       headers: {
-        Authorization: `Bearer ${process.env.DESK_ROUTINE_TOKEN}`,
+        Authorization: `Bearer ${envValue("DESK_ROUTINE_TOKEN")}`,
         "anthropic-beta": "experimental-cc-routine-2026-04-01",
         "anthropic-version": "2023-06-01",
         "Content-Type": "application/json",
       },
       body: JSON.stringify({ text: `New report requests queued: ${symbols.join(", ")}` }),
     });
-    if (!res.ok) return { fired: false, error: `routine fire returned ${res.status}` };
+    if (!res.ok) {
+      const detail = (await res.text().catch(() => "")).replace(/\s+/g, " ").slice(0, 200);
+      return { fired: false, error: `routine fire returned ${res.status}${detail ? `: ${detail}` : ""}` };
+    }
     return { fired: true };
   } catch (e: any) {
-    return { fired: false, error: String(e?.message || e) };
+    return { fired: false, error: String(e?.message || e).slice(0, 200) };
   }
 }
 

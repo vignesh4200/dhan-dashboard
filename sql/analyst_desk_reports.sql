@@ -29,3 +29,5 @@ create index if not exists idx_desk_reports_status on analyst_desk_reports(statu
 -- Upgrade for tables created from the first version of this file.
 alter table analyst_desk_reports add column if not exists claimed_at timestamptz;
 alter table analyst_desk_reports alter column status set default 'queued';
+alter table analyst_desk_reports add column if not exists fire_attempted_at timestamptz;
+alter table analyst_desk_reports add column if not exists fire_note text;   -- 'started' or why auto-start failed
