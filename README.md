@@ -141,3 +141,16 @@ The Research tab pulls quotes and company news via a self-hosted OpenBB Open Dat
    - `OPENBB_API_URL` — the base URL of your deployed ODP server
    - `OPENBB_API_KEY` — optional, only if your deployment requires a bearer token
 3. Redeploy. The Research tab in the sidebar will start showing data once it can reach your server.
+
+## Analyst Desk — on-demand reports
+
+The Analyst Desk page (`/dashboard/analyst-desk`) lets you pick stocks from your
+holdings, your Smart Signals watchlist, or any NSE symbol you type, and writes
+an investment-committee memo for each one that ends in a Buy / Accumulate /
+Hold / Avoid / Sell decision. It uses Claude with live web search.
+
+1. Supabase SQL Editor → run `sql/analyst_desk_reports.sql`.
+2. Vercel → Environment Variables → add `ANTHROPIC_API_KEY` (from
+   https://platform.claude.com). Each report is billed to that key.
+3. Reports take roughly 2–4 minutes; the route asks for Vercel's 300s function
+   limit (`maxDuration`), so make sure Fluid Compute is on for the project.
