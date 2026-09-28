@@ -18,6 +18,7 @@ type Report = {
   reportMarkdown: string | null;
   sources: string[];
   error: string | null;
+  fireNote: string | null;
   createdAt: string;
   claimedAt: string | null;
   completedAt: string | null;
@@ -48,7 +49,7 @@ export default function DeskReports() {
   const router = useRouter();
   const [reports, setReports] = useState<Report[] | null>(null);
   const [suggestions, setSuggestions] = useState<{ holdings: string[]; watchlist: string[] }>({ holdings: [], watchlist: [] });
-  const [routineConfigured, setRoutineConfigured] = useState(true);
+  const [routineMissing, setRoutineMissing] = useState<string[]>([]);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [selected, setSelected] = useState<string[]>([]);
@@ -74,7 +75,7 @@ export default function DeskReports() {
       seenDone.current = new Set(done);
       setReports(list);
       setSuggestions(d.suggestions || { holdings: [], watchlist: [] });
-      setRoutineConfigured(d.routineConfigured !== false);
+      setRoutineMissing(Array.isArray(d.routineMissing) ? d.routineMissing : []);
     } catch (e) {
       setLoadError(String(e));
     }
@@ -162,10 +163,10 @@ export default function DeskReports() {
           subscription through a Claude Code routine; a batch usually takes 5–15 minutes.
         </div>
 
-        {!routineConfigured && (
+        {routineMissing.length > 0 && (
           <div className="auth-note" style={{ marginTop: 0, marginBottom: 12 }}>
-            Auto-start isn&apos;t set up yet (DESK_ROUTINE_FIRE_URL / DESK_ROUTINE_TOKEN). Requests will wait in the queue
-            until you click Run now on the routine at claude.ai/code/routines.
+            Auto-start is off: this deployment can&apos;t see {routineMissing.join(" and ")}. Requests will wait in the
+            queue until you click Run now on the routine at claude.ai/code/routines.
           </div>
         )}
         {loadError && <div className="auth-error">{loadError}</div>}
@@ -252,7 +253,15 @@ export default function DeskReports() {
                     </span>
                   )}
                   {r.status === "error" && <span style={{ color: "var(--loss)", fontSize: 12 }}>Failed: {r.error}</span>}
-                  {r.status === "queued" && <span style={{ color: "var(--text-muted)", fontSize: 12 }}>Queued — waiting for the desk</span>}
+                  {r.status === "queued" && (
+                    <span style={{ color: r.fireNote && r.fireNote !== "started" ? "var(--loss)" : "var(--text-muted)", fontSize: 12 }}>
+                      {r.fireNote && r.fireNote !== "started"
+                        ? `Queued — couldn't start the desk: ${r.fireNote}`
+                        : r.fireNote === "started"
+                        ? "Queued — desk starting…"
+                        : "Queued — waiting for the desk"}
+                    </span>
+                  )}
                   {r.status === "running" && (
                     <span style={{ color: "var(--text-muted)", fontSize: 12 }}>{stale ? "Didn't finish — try again" : "Researching…"}</span>
                   )}

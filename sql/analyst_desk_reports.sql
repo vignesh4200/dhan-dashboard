@@ -25,3 +25,9 @@ create table if not exists analyst_desk_reports (
 );
 create index if not exists idx_desk_reports_user_time on analyst_desk_reports(user_id, created_at desc);
 create index if not exists idx_desk_reports_status on analyst_desk_reports(status, created_at);
+
+-- Upgrade for tables created from the first version of this file.
+alter table analyst_desk_reports add column if not exists claimed_at timestamptz;
+alter table analyst_desk_reports alter column status set default 'queued';
+alter table analyst_desk_reports add column if not exists fire_attempted_at timestamptz;
+alter table analyst_desk_reports add column if not exists fire_note text;   -- 'started' or why auto-start failed

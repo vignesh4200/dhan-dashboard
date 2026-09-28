@@ -2,12 +2,29 @@ import { NextRequest, NextResponse } from "next/server";
 import { getCurrentUser } from "@/lib/session";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import { isValidNseSymbol } from "@/lib/ingestAnalystDesk";
-import { fireDeskRoutine, routineConfigured, toReport } from "@/lib/deskReports";
+import { fireDeskRoutine, routineMissing, toReport } from "@/lib/deskReports";
 
 // On-demand Analyst Desk reports for the logged-in user. You pick stocks on
 // /dashboard/analyst-desk; POST queues them and pokes the Claude Code routine,
 // which writes the memos back through ./ingest. See lib/deskReports.ts.
 export const dynamic = "force-dynamic";
+
+// A queued request nobody picked up (the fire failed, or the routine hit a
+// usage limit) is re-fired when the page polls, at most this often, and only
+// for its first hour so a broken setup doesn't burn routine runs all day.
+const REFIRE_AFTER_MS = 3 * 60 * 1000;
+const REFIRE_WINDOW_MS = 60 * 60 * 1000;
+
+// Poke the routine and record the outcome on the rows, so a failed auto-start
+// is visible on the card (and in Supabase) instead of silently waiting.
+async function fireAndRecord(ids: number[], symbols: string[]) {
+  const fire = await fireDeskRoutine(symbols);
+  await supabaseAdmin
+    .from("analyst_desk_reports")
+    .update({ fire_attempted_at: new Date().toISOString(), fire_note: fire.fired ? "started" : fire.error || "not started" })
+    .in("id", ids);
+  return fire;
+}
 
 async function latestHoldings(userId: string): Promise<any[]> {
   const { data: snap } = await supabaseAdmin
@@ -39,6 +56,19 @@ export async function GET() {
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
 
+  const now = Date.now();
+  const stuck = (reports || []).filter(
+    (r: any) =>
+      r.status === "queued" &&
+      now - new Date(r.created_at).getTime() > REFIRE_AFTER_MS &&
+      now - new Date(r.created_at).getTime() < REFIRE_WINDOW_MS &&
+      (!r.fire_attempted_at || now - new Date(r.fire_attempted_at).getTime() > REFIRE_AFTER_MS)
+  );
+  if (stuck.length > 0) {
+    const fire = await fireAndRecord(stuck.map((r: any) => r.id), stuck.map((r: any) => r.symbol));
+    for (const r of stuck) r.fire_note = fire.fired ? "started" : fire.error || "not started";
+  }
+
   const clean = (rows: any[] | null) =>
     Array.from(new Set((rows || []).map((r) => String(r?.symbol || "").trim().toUpperCase()).filter(Boolean))).sort();
   const holdingSymbols = clean(holdings);
@@ -47,7 +77,7 @@ export async function GET() {
   return NextResponse.json({
     reports: (reports || []).map(toReport),
     suggestions: { holdings: holdingSymbols, watchlist: watchlistSymbols },
-    routineConfigured: routineConfigured(),
+    routineMissing: routineMissing(),
   });
 }
 
@@ -90,7 +120,8 @@ export async function POST(req: NextRequest) {
     queued = data || [];
   }
 
-  const fire = queued.length > 0 ? await fireDeskRoutine(toQueue) : { fired: false };
+  const fire = queued.length > 0 ? await fireAndRecord(queued.map((r) => r.id), toQueue) : { fired: false };
+  for (const r of queued) r.fire_note = fire.fired ? "started" : ("error" in fire && fire.error) || "not started";
 
   return NextResponse.json({
     queued: queued.map(toReport),
