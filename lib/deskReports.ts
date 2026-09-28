@@ -29,21 +29,24 @@ export const toReport = (r: any) => ({
   completedAt: r.completed_at,
 });
 
-// Routine API trigger. DESK_ROUTINE_FIRE_URL is the routine's /fire URL and
-// DESK_ROUTINE_TOKEN the bearer token, both from claude.ai/code/routines →
-// the routine → Edit → Add another trigger → API. Values are trimmed and
-// stripped of surrounding quotes, which a copy-paste into Vercel often adds.
+// Routine API trigger. DESK_ROUTINE_TOKEN is the bearer token from
+// claude.ai/code/routines → the routine → Edit → API trigger. The Fire URL
+// isn't secret, so it defaults to the "Analyst Desk — on-demand reports"
+// routine; set DESK_ROUTINE_FIRE_URL only to point at a different routine.
+// Values are trimmed and stripped of surrounding quotes, which a copy-paste
+// into Vercel often adds.
+const DEFAULT_FIRE_URL = "https://api.anthropic.com/v1/claude_code/routines/trig_01Xtoz8TLH7Z36bXokM8jX1j/fire";
+
 const envValue = (name: string) => (process.env[name] || "").trim().replace(/^["']|["']$/g, "").trim();
 
-export const routineMissing = () =>
-  ["DESK_ROUTINE_FIRE_URL", "DESK_ROUTINE_TOKEN"].filter((name) => !envValue(name));
+export const routineMissing = () => ["DESK_ROUTINE_TOKEN"].filter((name) => !envValue(name));
 
 export const routineConfigured = () => routineMissing().length === 0;
 
 export async function fireDeskRoutine(symbols: string[]): Promise<{ fired: boolean; error?: string }> {
   const missing = routineMissing();
   if (missing.length > 0) return { fired: false, error: `not set on this deployment: ${missing.join(", ")}` };
-  const url = envValue("DESK_ROUTINE_FIRE_URL");
+  const url = envValue("DESK_ROUTINE_FIRE_URL") || DEFAULT_FIRE_URL;
   if (!/^https:\/\/api\.anthropic\.com\/.+\/fire$/.test(url)) {
     return { fired: false, error: "DESK_ROUTINE_FIRE_URL should be the routine's Fire URL, ending in /fire" };
   }
