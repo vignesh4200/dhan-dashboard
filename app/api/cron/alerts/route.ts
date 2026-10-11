@@ -1,8 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
-import { sendTelegramMessage, sendTelegramAlert, isTelegramConfigured } from "@/lib/telegram";
+import { sendTelegramMessage, sendTelegramPhoto, isTelegramConfigured } from "@/lib/telegram";
 import { tierFor, alertMessage } from "@/lib/alerts";
 import { getDividendsForSymbols } from "@/lib/nse-dividends";
+import { renderStatCard, renderSummaryCard, inrImg, signImg } from "@/lib/alert-card";
 
 // ONE cron job covers every alert type. Run this every 15 min (same cadence
 // as the stock refresh) — it only READS data the other crons have already
@@ -11,9 +12,27 @@ import { getDividendsForSymbols } from "@/lib/nse-dividends";
 // often is cheap. The slow/once-a-day pieces (dividend-declared, daily
 // summary) are internally throttled via last_daily_alert_date so they still
 // only fire once per day no matter how often this is pinged.
+//
+// Every alert sends as a rendered PNG card (branded, matches the dashboard's
+// own dark theme) with a short caption, uploaded directly to Telegram as
+// bytes — not fetched by Telegram from our own domain, which sits behind
+// Vercel's SSO protection. If card rendering or the photo upload fails for
+// any reason, falls back to the plain HTML text message so an alert is
+// never silently dropped.
 //   GET https://your-app.vercel.app/api/cron/alerts?secret=YOUR_CRON_SECRET
 const MILESTONE_STEP = 100000; // ₹1,00,000 (1 lakh)
 const DAILY_ALERT_HOUR_IST = 20; // only run the once-a-day block at/after 8pm IST
+
+async function sendCard(params: { chatId: string; render: () => Promise<Buffer>; caption: string; fallbackText: string }) {
+  try {
+    const buf = await params.render();
+    await sendTelegramPhoto({ chatId: params.chatId, buffer: buf, caption: params.caption });
+    return "image";
+  } catch (e) {
+    await sendTelegramMessage({ chatId: params.chatId, text: params.fallbackText });
+    return "text_fallback";
+  }
+}
 
 export async function GET(req: NextRequest) {
   const secret = req.nextUrl.searchParams.get("secret");
@@ -57,7 +76,7 @@ export async function GET(req: NextRequest) {
 
   for (const user of users || []) {
     const chatId = user.telegram_chat_id as string;
-    const userResult: any = { user: user.id, chatId: true };
+    const userResult: any = { user: user.id };
 
     try {
       // --- 1. Profit-booking alerts (7% / 8%) ---
@@ -86,7 +105,26 @@ export async function GET(req: NextRequest) {
           .maybeSingle();
         if (already) continue;
 
-        await sendTelegramAlert({ chatId, symbol: h.symbol, pnlPct: h.pnlPct, message: alertMessage(tier, h.pnlPct) });
+        const tierLabel = tier === "sell" ? "Target reached" : "Approaching target";
+        await sendCard({
+          chatId,
+          render: () =>
+            renderStatCard({
+              eyebrow: "Profit Booking",
+              accent: tier === "sell" ? "#34D399" : "#F0B94F",
+              icon: tier === "sell" ? "\u{1F3AF}" : "\u{1F440}",
+              headline: `${h.symbol} ${tier === "sell" ? "has hit" : "is nearing"} your ${tier === "sell" ? "8%" : "7%"} booking target`,
+              bigValue: `${signImg(h.pnlPct)}${Math.abs(h.pnlPct).toFixed(1)}%`,
+              bigValueColor: tier === "sell" ? "#34D399" : "#F0B94F",
+              rows: [
+                { label: "Invested", value: inrImg(h.invested) },
+                { label: "Current", value: inrImg(h.current), color: tier === "sell" ? "#34D399" : "#F0B94F" },
+              ],
+            }),
+          caption: `${tier === "sell" ? "🎯" : "👀"} <b>${h.symbol}</b> ${tierLabel}`,
+          fallbackText: `${tier === "sell" ? "🎯" : "👀"} <b>${h.symbol}</b> ${alertMessage(tier, h.pnlPct)}`,
+        });
+
         await supabaseAdmin.from("alert_log").insert({ user_id: user.id, symbol: h.symbol, tier, pnl_pct: h.pnlPct });
         profitAlertsSent++;
       }
@@ -99,11 +137,20 @@ export async function GET(req: NextRequest) {
         const crossed = user.gold_alert_last_side && user.gold_alert_last_side !== side;
 
         if (crossed) {
-          const arrow = side === "above" ? "📈" : "📉";
           const verb = side === "above" ? "risen above" : "dropped below";
-          await sendTelegramMessage({
+          await sendCard({
             chatId,
-            text: `${arrow} <b>Gold Alert</b>\nIBJA 999 rate has ${verb} your target of ₹${target.toLocaleString("en-IN")}/g — now ₹${latestGold.rate_999.toLocaleString("en-IN")}/g.`,
+            render: () =>
+              renderStatCard({
+                eyebrow: "Gold Alert",
+                accent: "#F0B94F",
+                icon: side === "above" ? "\u{1F4C8}" : "\u{1F4C9}",
+                headline: `IBJA 999 rate has ${verb} your target of ${inrImg(target)}/g`,
+                bigValue: `${inrImg(latestGold.rate_999!)}/g`,
+                bigValueColor: "#F0B94F",
+              }),
+            caption: `${side === "above" ? "📈" : "📉"} <b>Gold Alert</b> — ${verb} ₹${target.toLocaleString("en-IN")}/g`,
+            fallbackText: `${side === "above" ? "📈" : "📉"} <b>Gold Alert</b>\nIBJA 999 rate has ${verb} your target of ₹${target.toLocaleString("en-IN")}/g — now ₹${latestGold.rate_999.toLocaleString("en-IN")}/g.`,
           });
           goldAlertSent = true;
         }
@@ -118,9 +165,20 @@ export async function GET(req: NextRequest) {
         const currentMilestone = Math.floor(totalPortfolio / MILESTONE_STEP) * MILESTONE_STEP;
         const lastNotified = Number(user.last_milestone_notified ?? 0);
         if (currentMilestone > lastNotified) {
-          await sendTelegramMessage({
+          await sendCard({
             chatId,
-            text: `🎉 <b>Portfolio Milestone!</b>\nYour total portfolio (stocks + mutual funds + gold) has crossed ₹${currentMilestone.toLocaleString("en-IN")} — currently ₹${Math.round(totalPortfolio).toLocaleString("en-IN")}.`,
+            render: () =>
+              renderStatCard({
+                eyebrow: "Milestone",
+                accent: "#6B5CE6",
+                icon: "\u{1F389}",
+                headline: "Your portfolio has crossed a new milestone",
+                bigValue: inrImg(currentMilestone),
+                bigValueColor: "#EDEEF5",
+                subtext: `Currently ${inrImg(totalPortfolio)}`,
+              }),
+            caption: `🎉 <b>Portfolio Milestone!</b> Crossed ₹${currentMilestone.toLocaleString("en-IN")}`,
+            fallbackText: `🎉 <b>Portfolio Milestone!</b>\nYour total portfolio (stocks + mutual funds + gold) has crossed ₹${currentMilestone.toLocaleString("en-IN")} — currently ₹${Math.round(totalPortfolio).toLocaleString("en-IN")}.`,
           });
           await supabaseAdmin.from("users").update({ last_milestone_notified: currentMilestone }).eq("id", user.id);
           milestoneAlertSent = true;
@@ -147,10 +205,22 @@ export async function GET(req: NextRequest) {
               .maybeSingle();
             if (already) continue;
 
-            await sendTelegramMessage({
+            await sendCard({
               chatId,
-              text: `💰 <b>Dividend Declared — ${d.symbol}</b>\n${d.label}\nRecord date: ${d.date}`,
+              render: () =>
+                renderStatCard({
+                  eyebrow: "Dividend Declared",
+                  accent: "#34D399",
+                  icon: "\u{1F4B0}",
+                  headline: `${d.symbol} declared a dividend`,
+                  bigValue: d.label,
+                  bigValueColor: "#34D399",
+                  subtext: `Record date: ${d.date}`,
+                }),
+              caption: `💰 <b>Dividend Declared — ${d.symbol}</b>`,
+              fallbackText: `💰 <b>Dividend Declared — ${d.symbol}</b>\n${d.label}\nRecord date: ${d.date}`,
             });
+
             await supabaseAdmin.from("alert_log").insert({ user_id: user.id, symbol: d.symbol, tier });
             dividendAlertsSent++;
           }
@@ -175,41 +245,60 @@ export async function GET(req: NextRequest) {
             .gte("record_date", monthStart);
           const dividendsThisMonth = (divThisMonth || []).reduce((s, r) => s + Number(r.amount), 0);
 
+          const stocksCurrent = latestCombined?.stocks_current ?? totalCurrent;
+          const mfCurrent = latestCombined?.mf_current ?? 0;
+          const goldCurrent = latestCombined?.gold_current ?? 0;
+
           const sign = (n: number) => (n >= 0 ? "+" : "−");
           const inr = (n: number) => "₹" + Math.round(Math.abs(n)).toLocaleString("en-IN");
           const dayEmoji = dayPnl >= 0 ? "🟢" : "🔴";
 
-          const lines = [
+          const fallbackLines = [
             `📊 <b>Daily Portfolio Summary</b>`,
             ``,
             `Total Value: <b>${inr(totalCurrent)}</b>`,
             `${dayEmoji} Today: ${sign(dayPnl)}${inr(dayPnl)}`,
             `Overall P&amp;L: ${sign(totalPnl)}${inr(totalPnl)} (${sign(totalPnlPct)}${Math.abs(totalPnlPct).toFixed(1)}%)`,
             ``,
-            `📦 Stocks: ${inr(latestCombined?.stocks_current ?? totalCurrent)}`,
-            `🏦 Mutual Funds: ${inr(latestCombined?.mf_current ?? 0)}`,
-            `🪙 Gold: ${inr(latestCombined?.gold_current ?? 0)}`,
+            `📦 Stocks: ${inr(stocksCurrent)}`,
+            `🏦 Mutual Funds: ${inr(mfCurrent)}`,
+            `🪙 Gold: ${inr(goldCurrent)}`,
           ];
-          if (best) lines.push(``, `🏆 Best: <b>${best.symbol}</b> ${sign(best.pnlPct)}${Math.abs(best.pnlPct).toFixed(1)}%`);
-          if (worst && worst !== best) lines.push(`📉 Worst: <b>${worst.symbol}</b> ${sign(worst.pnlPct)}${Math.abs(worst.pnlPct).toFixed(1)}%`);
-          if (dividendsThisMonth > 0) lines.push(``, `💵 Dividends this month: ${inr(dividendsThisMonth)}`);
+          if (best) fallbackLines.push(``, `🏆 Best: <b>${best.symbol}</b> ${sign(best.pnlPct)}${Math.abs(best.pnlPct).toFixed(1)}%`);
+          if (worst && worst !== best) fallbackLines.push(`📉 Worst: <b>${worst.symbol}</b> ${sign(worst.pnlPct)}${Math.abs(worst.pnlPct).toFixed(1)}%`);
+          if (dividendsThisMonth > 0) fallbackLines.push(``, `💵 Dividends this month: ${inr(dividendsThisMonth)}`);
 
-          await sendTelegramMessage({ chatId, text: lines.join("\n") });
+          await sendCard({
+            chatId,
+            render: () =>
+              renderSummaryCard({
+                totalCurrent,
+                dayPnl,
+                totalPnl,
+                totalPnlPct,
+                stocksCurrent,
+                mfCurrent,
+                goldCurrent,
+                best: best ? { symbol: best.symbol, pnlPct: best.pnlPct } : undefined,
+                worst: worst ? { symbol: worst.symbol, pnlPct: worst.pnlPct } : undefined,
+                dividendsThisMonth,
+              }),
+            caption: `📊 <b>Daily Portfolio Summary</b> — ${inr(totalCurrent)}`,
+            fallbackText: fallbackLines.join("\n"),
+          });
           summarySent = true;
         }
 
         await supabaseAdmin.from("users").update({ last_daily_alert_date: todayIst }).eq("id", user.id);
       }
 
-      results.push({
-        user: user.id,
-        ok: true,
-        profitAlertsSent,
-        goldAlertSent,
-        milestoneAlertSent,
-        dividendAlertsSent,
-        summarySent,
-      });
+      userResult.ok = true;
+      userResult.profitAlertsSent = profitAlertsSent;
+      userResult.goldAlertSent = goldAlertSent;
+      userResult.milestoneAlertSent = milestoneAlertSent;
+      userResult.dividendAlertsSent = dividendAlertsSent;
+      userResult.summarySent = summarySent;
+      results.push(userResult);
     } catch (e: any) {
       results.push({ user: user.id, ok: false, error: e.message });
     }

@@ -51,3 +51,28 @@ export async function sendTelegramAlert(params: {
     text: `${emoji} <b>${params.symbol}</b> ${params.message}`,
   });
 }
+
+// Uploads an image directly (multipart) rather than handing Telegram a URL
+// to fetch — our own domain sits behind Vercel SSO/deployment protection,
+// so Telegram's servers couldn't reach it. Uploading bytes we already
+// generated server-side sidesteps that entirely.
+export async function sendTelegramPhoto(params: { chatId: string; buffer: Buffer; caption?: string }) {
+  const token = process.env.TELEGRAM_BOT_TOKEN;
+  if (!token) throw new Error("TELEGRAM_BOT_TOKEN env var missing.");
+
+  const form = new FormData();
+  form.append("chat_id", params.chatId);
+  if (params.caption) {
+    form.append("caption", params.caption);
+    form.append("parse_mode", "HTML");
+  }
+  form.append("photo", new Blob([params.buffer], { type: "image/png" }), "alert.png");
+
+  const res = await fetch(`${API_BASE}/bot${token}/sendPhoto`, { method: "POST", body: form });
+
+  if (!res.ok) {
+    const errBody = await res.text();
+    throw new Error(`Telegram sendPhoto failed: ${res.status} ${errBody}`);
+  }
+  return res.json();
+}
