@@ -12,13 +12,19 @@ export async function GET() {
     .eq("user_id", user.id)
     .order("purchase_date", { ascending: false });
 
-  // No artificial row cap here — with ~19 years of backfilled history plus
-  // twice-daily IBJA refreshes, this can be thousands of rows. The client
-  // handles time-range filtering (1M/1Y/5Y/20Y/All) itself.
-  const { data: history } = await supabaseAdmin
+  // With ~19 years of backfilled history plus hourly IBJA refreshes this is
+  // now well past Supabase/PostgREST's default 1000-row cap. An unlimited
+  // ascending query silently truncates to the OLDEST 1000 rows, which was
+  // cutting off the most recent data (same bug class as the Portfolio
+  // Performance chart). Fetch the most recent rows descending instead, then
+  // reverse to chronological order. The client handles time-range filtering
+  // (1M/1Y/5Y/20Y/All) itself.
+  const { data: historyDesc } = await supabaseAdmin
     .from("gold_rate_history")
     .select("*")
-    .order("captured_at", { ascending: true });
+    .order("captured_at", { ascending: false })
+    .limit(5000);
+  const history = (historyDesc || []).slice().reverse();
 
   const enrichedHoldings = (holdings || []).map((h) => {
     const currentValue = h.current_value ?? h.amount_paid;
