@@ -67,7 +67,7 @@ export async function GET(req: NextRequest) {
 
   const { data: latestCombined } = await supabaseAdmin
     .from("combined_snapshots")
-    .select("stocks_current, mf_current, gold_current, captured_at")
+    .select("stocks_current, stocks_invested, mf_current, mf_invested, gold_current, gold_invested, captured_at")
     .order("captured_at", { ascending: false })
     .limit(1)
     .maybeSingle();
@@ -299,11 +299,39 @@ export async function GET(req: NextRequest) {
         }
 
         if (latestSnap) {
-          const totalInvested = Number(latestSnap.total_invested ?? 0);
-          const totalCurrent = Number(latestSnap.total_current ?? 0);
-          const totalPnl = Number(latestSnap.total_pnl ?? 0);
-          const dayPnl = Number(latestSnap.day_pnl ?? 0);
+          // Summary totals must cover the WHOLE portfolio (stocks + mutual
+          // funds + gold), not just stocks — latestSnap/portfolio_snapshots
+          // only ever held the stocks side, so using its total_current as
+          // "Total Value" was quietly showing a stocks-only number as the
+          // portfolio total (e.g. showing ₹5.1L when the real combined
+          // total was ₹16.1L). latestCombined (combined_snapshots) is the
+          // one row that actually sums all three asset types.
+          const stocksCurrent = latestCombined?.stocks_current ?? Number(latestSnap.total_current ?? 0);
+          const mfCurrent = latestCombined?.mf_current ?? 0;
+          const goldCurrent = latestCombined?.gold_current ?? 0;
+          const stocksInvested = latestCombined?.stocks_invested ?? Number(latestSnap.total_invested ?? 0);
+          const mfInvested = latestCombined?.mf_invested ?? 0;
+          const goldInvested = latestCombined?.gold_invested ?? 0;
+
+          const totalCurrent = stocksCurrent + mfCurrent + goldCurrent;
+          const totalInvested = stocksInvested + mfInvested + goldInvested;
+          const totalPnl = totalCurrent - totalInvested;
           const totalPnlPct = totalInvested > 0 ? (totalPnl / totalInvested) * 100 : 0;
+
+          // "Today" change: diff against the closest combined_snapshots row
+          // from before today started (IST), not just stocks' own day_pnl.
+          const todayStartIst = new Date(`${todayIst}T00:00:00+05:30`).toISOString();
+          const { data: priorCombined } = await supabaseAdmin
+            .from("combined_snapshots")
+            .select("stocks_current, mf_current, gold_current")
+            .lt("captured_at", todayStartIst)
+            .order("captured_at", { ascending: false })
+            .limit(1)
+            .maybeSingle();
+          const priorTotal = priorCombined
+            ? (priorCombined.stocks_current ?? 0) + (priorCombined.mf_current ?? 0) + (priorCombined.gold_current ?? 0)
+            : null;
+          const dayPnl = priorTotal != null ? totalCurrent - priorTotal : 0;
 
           const sorted = [...holdings].filter((h) => typeof h.pnlPct === "number").sort((a, b) => b.pnlPct - a.pnlPct);
           const best = sorted[0];
@@ -316,10 +344,6 @@ export async function GET(req: NextRequest) {
             .eq("user_id", user.id)
             .gte("record_date", monthStart);
           const dividendsThisMonth = (divThisMonth || []).reduce((s, r) => s + Number(r.amount), 0);
-
-          const stocksCurrent = latestCombined?.stocks_current ?? totalCurrent;
-          const mfCurrent = latestCombined?.mf_current ?? 0;
-          const goldCurrent = latestCombined?.gold_current ?? 0;
 
           const sign = (n: number) => (n >= 0 ? "+" : "−");
           const inr = (n: number) => "₹" + Math.round(Math.abs(n)).toLocaleString("en-IN");
