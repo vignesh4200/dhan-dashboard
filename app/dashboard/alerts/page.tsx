@@ -61,7 +61,7 @@ export default function AlertsPage() {
       )}
 
       <div style={{ marginTop: 24, fontSize: 12, color: "var(--text-muted)" }}>
-        These same alerts are also sent to WhatsApp automatically (once configured) whenever a holding first crosses either threshold on a given day.
+        These same alerts are also sent to Telegram automatically (once your bot token and chat ID are set up in Settings) whenever a holding first crosses either threshold on a given day.
       </div>
     </div>
   );

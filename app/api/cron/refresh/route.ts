@@ -6,6 +6,7 @@ import { getSectorsForHoldings } from "@/lib/yahoo-profile";
 import { generateTotpCode } from "@/lib/totp";
 import { computeHolding, tierFor, alertMessage } from "@/lib/alerts";
 import { sendWhatsAppAlert, isWhatsAppConfigured } from "@/lib/whatsapp";
+import { sendTelegramAlert, isTelegramConfigured } from "@/lib/telegram";
 import { runDividendAutoLog } from "@/lib/dividend-auto-log";
 
 // Called every 15 minutes by an external cron pinger (e.g. cron-job.org) hitting:
@@ -29,7 +30,7 @@ export async function GET(req: NextRequest) {
 
   const { data: users } = await supabaseAdmin
     .from("users")
-    .select("id, phone, whatsapp_number, dhan_credentials(dhan_client_id, dhan_pin_encrypted, totp_secret_encrypted)");
+    .select("id, phone, whatsapp_number, telegram_chat_id, dhan_credentials(dhan_client_id, dhan_pin_encrypted, totp_secret_encrypted)");
 
   const results: any[] = [];
 
@@ -97,12 +98,14 @@ export async function GET(req: NextRequest) {
 
       const whatsappReady = isWhatsAppConfigured();
       const toNumber = user.whatsapp_number || user.phone;
+      const telegramReady = isTelegramConfigured();
+      const chatId = (user as any).telegram_chat_id;
       let alertsSent = 0;
 
-      if (whatsappReady) {
+      if (whatsappReady || (telegramReady && chatId)) {
         for (const h of computed) {
           const tier = tierFor(h.pnlPct);
-          if (!tier || !toNumber) continue;
+          if (!tier) continue;
 
           const { data: already } = await supabaseAdmin
             .from("alert_log")
@@ -115,12 +118,18 @@ export async function GET(req: NextRequest) {
 
           if (already) continue;
 
-          await sendWhatsAppAlert({
-            toPhoneE164: toNumber,
-            symbol: h.symbol,
-            pnlPct: h.pnlPct,
-            message: alertMessage(tier, h.pnlPct),
-          });
+          const message = alertMessage(tier, h.pnlPct);
+          let sent = false;
+
+          if (telegramReady && chatId) {
+            await sendTelegramAlert({ chatId, symbol: h.symbol, pnlPct: h.pnlPct, message });
+            sent = true;
+          } else if (whatsappReady && toNumber) {
+            await sendWhatsAppAlert({ toPhoneE164: toNumber, symbol: h.symbol, pnlPct: h.pnlPct, message });
+            sent = true;
+          }
+
+          if (!sent) continue;
 
           await supabaseAdmin.from("alert_log").insert({
             user_id: user.id,
@@ -137,6 +146,7 @@ export async function GET(req: NextRequest) {
         user: user.id,
         holdings: computed.length,
         whatsappConfigured: whatsappReady,
+        telegramConfigured: telegramReady && !!chatId,
         alertsSent,
         ok: true,
       });

@@ -15,14 +15,25 @@ export async function GET() {
     .eq("user_id", user.id)
     .single();
 
-  return NextResponse.json({ configured: !!data, ...data });
+  const { data: userRow } = await supabaseAdmin
+    .from("users")
+    .select("whatsapp_number, telegram_chat_id")
+    .eq("id", user.id)
+    .single();
+
+  return NextResponse.json({
+    configured: !!data,
+    ...data,
+    whatsappNumber: userRow?.whatsapp_number || "",
+    telegramChatId: userRow?.telegram_chat_id || "",
+  });
 }
 
 export async function POST(req: NextRequest) {
   const user = await getCurrentUser();
   if (!user) return NextResponse.json({ error: "unauthenticated" }, { status: 401 });
 
-  const { dhanClientId, dhanPin, totpSecret, whatsappNumber } = await req.json();
+  const { dhanClientId, dhanPin, totpSecret, whatsappNumber, telegramChatId } = await req.json();
   if (!dhanClientId || !dhanPin || !totpSecret) {
     return NextResponse.json({ error: "Client ID, PIN, and TOTP secret are all required" }, { status: 400 });
   }
@@ -46,8 +57,11 @@ export async function POST(req: NextRequest) {
     updated_at: new Date().toISOString(),
   });
 
-  if (whatsappNumber) {
-    await supabaseAdmin.from("users").update({ whatsapp_number: whatsappNumber }).eq("id", user.id);
+  if (whatsappNumber || telegramChatId) {
+    const updates: Record<string, string> = {};
+    if (whatsappNumber) updates.whatsapp_number = whatsappNumber;
+    if (telegramChatId) updates.telegram_chat_id = telegramChatId;
+    await supabaseAdmin.from("users").update(updates).eq("id", user.id);
   }
 
   return NextResponse.json({ ok: true });

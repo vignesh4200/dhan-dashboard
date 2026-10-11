@@ -7,13 +7,18 @@ export default function SettingsPage() {
   const [pin, setPin] = useState("");
   const [totpSecret, setTotpSecret] = useState("");
   const [whatsappNumber, setWhatsappNumber] = useState("");
+  const [telegramChatId, setTelegramChatId] = useState("");
   const [status, setStatus] = useState("");
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
     fetch("/api/settings/credentials")
       .then((r) => r.json())
-      .then((d) => setConfigured(!!d.configured));
+      .then((d) => {
+        setConfigured(!!d.configured);
+        if (d.whatsappNumber) setWhatsappNumber(d.whatsappNumber);
+        if (d.telegramChatId) setTelegramChatId(d.telegramChatId);
+      });
   }, []);
 
   async function save() {
@@ -23,7 +28,7 @@ export default function SettingsPage() {
       const res = await fetch("/api/settings/credentials", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ dhanClientId: clientId, dhanPin: pin, totpSecret, whatsappNumber }),
+        body: JSON.stringify({ dhanClientId: clientId, dhanPin: pin, totpSecret, whatsappNumber, telegramChatId }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Save failed");
@@ -81,7 +86,20 @@ export default function SettingsPage() {
           never need to touch this again unless you change your Dhan PIN or reset TOTP.
         </div>
 
-        <label className="field-label">WhatsApp number for alerts</label>
+        <label className="field-label">Telegram Chat ID for alerts</label>
+        <input
+          className="field-input"
+          value={telegramChatId}
+          onChange={(e) => setTelegramChatId(e.target.value)}
+          placeholder="e.g. 123456789"
+        />
+        <div style={{ fontSize: 11.5, color: "var(--text-muted)", marginTop: -8, marginBottom: 14 }}>
+          Message your bot on Telegram once (anything, e.g. "hi"), then open{" "}
+          <code>https://api.telegram.org/bot&lt;YOUR_BOT_TOKEN&gt;/getUpdates</code> in a browser — your
+          numeric chat id is at <code>result[0].message.chat.id</code>. Paste it here.
+        </div>
+
+        <label className="field-label">WhatsApp number for alerts (optional, used only if Telegram isn't set)</label>
         <input
           className="field-input"
           value={whatsappNumber}
