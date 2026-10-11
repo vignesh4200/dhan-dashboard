@@ -185,8 +185,9 @@ export async function GET(req: NextRequest) {
         }
       }
 
-      // --- 4 & 5. Dividend-declared + daily summary (once/day, after 8pm IST) ---
+      // --- 4, 5 & 6. Dividend-declared + daily gold rate + daily summary (once/day, after 8pm IST) ---
       let dividendAlertsSent = 0;
+      let goldDailySent = false;
       let summarySent = false;
 
       if (runDailyBlock && user.last_daily_alert_date !== todayIst) {
@@ -224,6 +225,51 @@ export async function GET(req: NextRequest) {
             await supabaseAdmin.from("alert_log").insert({ user_id: user.id, symbol: d.symbol, tier });
             dividendAlertsSent++;
           }
+        }
+
+        // Daily gold rate — independent of the threshold alert, sent every
+        // day regardless of whether the user set a target, so they always
+        // know where IBJA 999 stands.
+        if (latestGold?.rate_999 != null) {
+          const cutoff = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+          const { data: dayAgoRow } = await supabaseAdmin
+            .from("gold_rate_history")
+            .select("rate_999")
+            .lte("captured_at", cutoff)
+            .order("captured_at", { ascending: false })
+            .limit(1)
+            .maybeSingle();
+
+          const rate = latestGold.rate_999;
+          const prevRate = dayAgoRow?.rate_999 ?? null;
+          const change = prevRate != null ? rate - prevRate : null;
+          const changePct = prevRate != null && prevRate > 0 ? (change! / prevRate) * 100 : null;
+
+          const changeLine =
+            change != null
+              ? `${signImg(change)}${inrImg(Math.abs(change))}/g (${signImg(changePct!)}${Math.abs(changePct!).toFixed(2)}%) vs yesterday`
+              : undefined;
+          const changeLineText =
+            change != null
+              ? `${change >= 0 ? "+" : "−"}₹${Math.abs(change).toLocaleString("en-IN")}/g (${changePct! >= 0 ? "+" : "−"}${Math.abs(changePct!).toFixed(2)}%) vs yesterday`
+              : "";
+
+          await sendCard({
+            chatId,
+            render: () =>
+              renderStatCard({
+                eyebrow: "Gold Rate",
+                accent: "#F0B94F",
+                icon: "\u{1FA99}",
+                headline: "Today's IBJA 999 gold rate",
+                bigValue: `${inrImg(rate)}/g`,
+                bigValueColor: "#F0B94F",
+                subtext: changeLine,
+              }),
+            caption: `🪙 <b>Daily Gold Rate</b> — ₹${rate.toLocaleString("en-IN")}/g`,
+            fallbackText: `🪙 <b>Daily Gold Rate</b>\nIBJA 999: ₹${rate.toLocaleString("en-IN")}/g${changeLineText ? `\n${changeLineText}` : ""}`,
+          });
+          goldDailySent = true;
         }
 
         if (latestSnap) {
@@ -297,6 +343,7 @@ export async function GET(req: NextRequest) {
       userResult.goldAlertSent = goldAlertSent;
       userResult.milestoneAlertSent = milestoneAlertSent;
       userResult.dividendAlertsSent = dividendAlertsSent;
+      userResult.goldDailySent = goldDailySent;
       userResult.summarySent = summarySent;
       results.push(userResult);
     } catch (e: any) {
