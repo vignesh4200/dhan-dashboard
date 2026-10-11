@@ -1,5 +1,5 @@
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
-import { getHistoricalDividendsForSymbol } from "@/lib/nse-historical-dividends";
+import { getHistoricalDividendsForSymbol, HistoricalDividend } from "@/lib/nse-historical-dividends";
 
 // Shared logic behind /api/cron/dividend-auto-log. For each CURRENTLY HELD
 // stock, checks whether any dividend's record date has recently passed
@@ -45,10 +45,21 @@ export async function runDividendAutoLog() {
       let logged = 0;
       let skipped = 0;
 
-      for (const h of holdings) {
-        const { dividends } = await getHistoricalDividendsForSymbol(h.symbol);
+      // Fetch every holding's dividend history CONCURRENTLY instead of one
+      // await at a time — with ~38 holdings, each a separate NSE round trip,
+      // the old sequential loop alone took 30-80s and was the reason this
+      // cron kept timing out (cron-job.org caps at 30s). The per-holding
+      // results are then processed in order below; DB writes stay small and
+      // fast so there's no need to parallelize those too.
+      const perHolding = await Promise.all(
+        holdings.map((h: any) => getHistoricalDividendsForSymbol(h.symbol))
+      );
 
-        const recentlyPassed = dividends.filter((d) => {
+      for (let i = 0; i < holdings.length; i++) {
+        const h = holdings[i];
+        const { dividends }: { dividends: HistoricalDividend[] } = perHolding[i];
+
+        const recentlyPassed = dividends.filter((d: HistoricalDividend) => {
           const recordDate = new Date(d.recordDate);
           return recordDate >= cutoff && recordDate <= today && d.perShareAmount;
         });

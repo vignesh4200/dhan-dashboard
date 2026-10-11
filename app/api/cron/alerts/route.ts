@@ -4,6 +4,7 @@ import { sendTelegramMessage, sendTelegramPhoto, isTelegramConfigured } from "@/
 import { tierFor, alertMessage } from "@/lib/alerts";
 import { getDividendsForSymbols } from "@/lib/nse-dividends";
 import { renderStatCard, renderSummaryCard, inrImg, signImg } from "@/lib/alert-card";
+import { runDividendAutoLog } from "@/lib/dividend-auto-log";
 
 // ONE cron job covers every alert type. Run this every 15 min (same cadence
 // as the stock refresh) — it only READS data the other crons have already
@@ -71,6 +72,23 @@ export async function GET(req: NextRequest) {
   );
   const todayIst = new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Kolkata" }); // YYYY-MM-DD
   const runDailyBlock = istHour >= DAILY_ALERT_HOUR_IST;
+  const needsDailyRun = runDailyBlock && (users || []).some((u) => u.last_daily_alert_date !== todayIst);
+
+  // Dividend auto-log (flips "Upcoming" to "Received" once a record date
+  // has passed) used to run inside /api/cron/refresh on every 15-min tick —
+  // sequential per-holding NSE fetches there took 30-80s and kept timing
+  // out cron-job.org's 30s cap. It only needs daily granularity (14-day
+  // lookback window), so it runs here instead, once, alongside the other
+  // once-a-day alerts. It loops over all users internally, so it's called
+  // once per invocation rather than once per user.
+  let dividendAutoLogResults: any[] = [];
+  if (needsDailyRun) {
+    try {
+      dividendAutoLogResults = await runDividendAutoLog();
+    } catch (e: any) {
+      dividendAutoLogResults = [{ ok: false, error: e.message }];
+    }
+  }
 
   const results: any[] = [];
 
@@ -351,5 +369,5 @@ export async function GET(req: NextRequest) {
     }
   }
 
-  return NextResponse.json({ ranAt: new Date().toISOString(), istHour, runDailyBlock, totalPortfolio, results });
+  return NextResponse.json({ ranAt: new Date().toISOString(), istHour, runDailyBlock, totalPortfolio, dividendAutoLogResults, results });
 }

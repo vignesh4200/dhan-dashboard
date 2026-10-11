@@ -5,7 +5,6 @@ import { getDhanHoldings, getLtpFromYahoo, generateAccessTokenViaTotp } from "@/
 import { getSectorsForHoldings } from "@/lib/yahoo-profile";
 import { generateTotpCode } from "@/lib/totp";
 import { computeHolding } from "@/lib/alerts";
-import { runDividendAutoLog } from "@/lib/dividend-auto-log";
 
 // Called every 15 minutes by an external cron pinger (e.g. cron-job.org) hitting:
 //   GET https://your-app.vercel.app/api/cron/refresh?secret=YOUR_CRON_SECRET
@@ -150,18 +149,12 @@ export async function GET(req: NextRequest) {
     results.push({ signalsRefresh: false, error: e.message });
   }
 
-  // Flip dividends from "Upcoming" to "Received" once their record date has
-  // passed. This used to live only behind the separate /api/cron/dividend-
-  // auto-log route, which nothing was ever scheduled to call — so
-  // dividends never got logged no matter how long past their record date.
-  // Reusing this 15-minute pinger (rather than a fourth cron-job.org job)
-  // keeps it running automatically.
-  let dividendAutoLogResults: any[] = [];
-  try {
-    dividendAutoLogResults = await runDividendAutoLog();
-  } catch (e: any) {
-    results.push({ dividendAutoLog: false, error: e.message });
-  }
+  // Dividend auto-log (flipping "Upcoming" to "Received") now runs once a
+  // day from /api/cron/alerts' existing daily block instead of on every
+  // 15-minute tick here — it was the reason this route kept timing out
+  // (sequential per-holding NSE fetches took 30-80s against cron-job.org's
+  // hard 30s cap). A 14-day lookback window doesn't need 15-minute
+  // granularity, so moving it off this hot path is free.
 
-  return NextResponse.json({ ranAt: new Date().toISOString(), results, signalsRefreshed, dividendAutoLogResults });
+  return NextResponse.json({ ranAt: new Date().toISOString(), results, signalsRefreshed });
 }
