@@ -60,7 +60,7 @@ export async function GET(req: NextRequest) {
 
   const { data: latestGold } = await supabaseAdmin
     .from("gold_rate_history")
-    .select("rate_999")
+    .select("rate_999, rate_22k")
     .order("captured_at", { ascending: false })
     .limit(1)
     .maybeSingle();
@@ -174,9 +174,10 @@ export async function GET(req: NextRequest) {
                 headline: `IBJA 999 rate has ${verb} your target of ${inrImg(target)}/g`,
                 bigValue: `${inrImg(latestGold.rate_999!)}/g`,
                 bigValueColor: "#F0B94F",
+                rows: latestGold.rate_22k != null ? [{ label: "22 KT", value: `${inrImg(latestGold.rate_22k)}/g` }] : [],
               }),
             caption: `${side === "above" ? "📈" : "📉"} <b>Gold Alert</b> — ${verb} ₹${target.toLocaleString("en-IN")}/g`,
-            fallbackText: `${side === "above" ? "📈" : "📉"} <b>Gold Alert</b>\nIBJA 999 rate has ${verb} your target of ₹${target.toLocaleString("en-IN")}/g — now ₹${latestGold.rate_999.toLocaleString("en-IN")}/g.`,
+            fallbackText: `${side === "above" ? "📈" : "📉"} <b>Gold Alert</b>\nIBJA 999 rate has ${verb} your target of ₹${target.toLocaleString("en-IN")}/g — now ₹${latestGold.rate_999.toLocaleString("en-IN")}/g.${latestGold.rate_22k != null ? `\n22 KT: ₹${latestGold.rate_22k.toLocaleString("en-IN")}/g` : ""}`,
           });
           goldAlertSent = true;
         }
@@ -260,13 +261,14 @@ export async function GET(req: NextRequest) {
           const cutoff = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
           const { data: dayAgoRow } = await supabaseAdmin
             .from("gold_rate_history")
-            .select("rate_999")
+            .select("rate_999, rate_22k")
             .lte("captured_at", cutoff)
             .order("captured_at", { ascending: false })
             .limit(1)
             .maybeSingle();
 
           const rate = latestGold.rate_999;
+          const rate22k = latestGold.rate_22k;
           const prevRate = dayAgoRow?.rate_999 ?? null;
           const change = prevRate != null ? rate - prevRate : null;
           const changePct = prevRate != null && prevRate > 0 ? (change! / prevRate) * 100 : null;
@@ -287,13 +289,14 @@ export async function GET(req: NextRequest) {
                 eyebrow: "Gold Rate",
                 accent: "#F0B94F",
                 icon: "\u{1FA99}",
-                headline: "Today's IBJA 999 gold rate",
+                headline: "Today's IBJA gold rate",
                 bigValue: `${inrImg(rate)}/g`,
                 bigValueColor: "#F0B94F",
                 subtext: changeLine,
+                rows: rate22k != null ? [{ label: "22 KT", value: `${inrImg(rate22k)}/g` }] : [],
               }),
-            caption: `🪙 <b>Daily Gold Rate</b> — ₹${rate.toLocaleString("en-IN")}/g`,
-            fallbackText: `🪙 <b>Daily Gold Rate</b>\nIBJA 999: ₹${rate.toLocaleString("en-IN")}/g${changeLineText ? `\n${changeLineText}` : ""}`,
+            caption: `🪙 <b>Daily Gold Rate</b> — 999: ₹${rate.toLocaleString("en-IN")}/g${rate22k != null ? ` · 22K: ₹${rate22k.toLocaleString("en-IN")}/g` : ""}`,
+            fallbackText: `🪙 <b>Daily Gold Rate</b>\nIBJA 999: ₹${rate.toLocaleString("en-IN")}/g${changeLineText ? `\n${changeLineText}` : ""}${rate22k != null ? `\n22 KT: ₹${rate22k.toLocaleString("en-IN")}/g` : ""}`,
           });
           goldDailySent = true;
         }
