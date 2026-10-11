@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import { fetchIbjaRates, rateForPurity } from "@/lib/gold-price";
+import { sendTelegramMessage, isTelegramConfigured } from "@/lib/telegram";
 
 // Run this TWICE A DAY (matching IBJA's AM/PM publish schedule):
 //   GET https://your-app.vercel.app/api/cron/gold-refresh?secret=YOUR_CRON_SECRET
@@ -44,12 +45,49 @@ export async function GET(req: NextRequest) {
     updated++;
   }
 
+  // Gold rate threshold alerts: each user can set a target 999 rate per
+  // gram in Settings. We track which "side" of the target the rate was on
+  // last time (gold_alert_last_side: "above"/"below") and fire a Telegram
+  // alert only when it actually CROSSES — not on every run it happens to
+  // stay on the same side, and not repeatedly once past it.
+  let goldAlertsSent = 0;
+  if (isTelegramConfigured() && rates.rate999 != null) {
+    const { data: usersWithTarget } = await supabaseAdmin
+      .from("users")
+      .select("id, telegram_chat_id, gold_alert_target, gold_alert_last_side")
+      .not("gold_alert_target", "is", null)
+      .not("telegram_chat_id", "is", null);
+
+    for (const u of usersWithTarget || []) {
+      const target = Number(u.gold_alert_target);
+      const side: "above" | "below" = rates.rate999 >= target ? "above" : "below";
+      const crossed = u.gold_alert_last_side && u.gold_alert_last_side !== side;
+
+      if (crossed && u.telegram_chat_id) {
+        const arrow = side === "above" ? "📈" : "📉";
+        const verb = side === "above" ? "risen above" : "dropped below";
+        try {
+          await sendTelegramMessage({
+            chatId: u.telegram_chat_id,
+            text: `${arrow} <b>Gold Alert</b>\nIBJA 999 rate has ${verb} your target of ₹${target.toLocaleString("en-IN")}/g — now ₹${rates.rate999.toLocaleString("en-IN")}/g.`,
+          });
+          goldAlertsSent++;
+        } catch {}
+      }
+
+      if (side !== u.gold_alert_last_side) {
+        await supabaseAdmin.from("users").update({ gold_alert_last_side: side }).eq("id", u.id);
+      }
+    }
+  }
+
   return NextResponse.json({
     ranAt: new Date().toISOString(),
     ok: true,
     rates,
     updated,
     skipped,
+    goldAlertsSent,
     diag,
   });
 }

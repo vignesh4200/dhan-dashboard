@@ -8,6 +8,7 @@ export default function SettingsPage() {
   const [totpSecret, setTotpSecret] = useState("");
   const [whatsappNumber, setWhatsappNumber] = useState("");
   const [telegramChatId, setTelegramChatId] = useState("");
+  const [goldAlertTarget, setGoldAlertTarget] = useState("");
   const [status, setStatus] = useState("");
   const [busy, setBusy] = useState(false);
 
@@ -18,6 +19,7 @@ export default function SettingsPage() {
         setConfigured(!!d.configured);
         if (d.whatsappNumber) setWhatsappNumber(d.whatsappNumber);
         if (d.telegramChatId) setTelegramChatId(d.telegramChatId);
+        if (d.goldAlertTarget !== "" && d.goldAlertTarget != null) setGoldAlertTarget(String(d.goldAlertTarget));
       });
   }, []);
 
@@ -28,7 +30,14 @@ export default function SettingsPage() {
       const res = await fetch("/api/settings/credentials", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ dhanClientId: clientId, dhanPin: pin, totpSecret, whatsappNumber, telegramChatId }),
+        body: JSON.stringify({
+          dhanClientId: clientId,
+          dhanPin: pin,
+          totpSecret,
+          whatsappNumber,
+          telegramChatId,
+          goldAlertTarget: goldAlertTarget === "" ? null : goldAlertTarget,
+        }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Save failed");
@@ -97,6 +106,18 @@ export default function SettingsPage() {
           Message your bot on Telegram once (anything, e.g. "hi"), then open{" "}
           <code>https://api.telegram.org/bot&lt;YOUR_BOT_TOKEN&gt;/getUpdates</code> in a browser — your
           numeric chat id is at <code>result[0].message.chat.id</code>. Paste it here.
+        </div>
+
+        <label className="field-label">Gold rate alert target (₹/g, 999 purity)</label>
+        <input
+          className="field-input"
+          type="number"
+          value={goldAlertTarget}
+          onChange={(e) => setGoldAlertTarget(e.target.value)}
+          placeholder="e.g. 15000"
+        />
+        <div style={{ fontSize: 11.5, color: "var(--text-muted)", marginTop: -8, marginBottom: 14 }}>
+          You'll get a Telegram alert the moment IBJA's 999 rate crosses this value in either direction. Leave blank to disable.
         </div>
 
         <label className="field-label">WhatsApp number for alerts (optional, used only if Telegram isn't set)</label>
