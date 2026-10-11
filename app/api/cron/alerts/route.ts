@@ -41,6 +41,14 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
 
+  // Manual test hook: ?test=1 forces the once-a-day block (dividend
+  // auto-log, daily gold rate, daily summary) to run right now regardless
+  // of the 8pm IST gate, WITHOUT marking today as already sent — so
+  // tonight's real scheduled run still fires normally. Dividend-declared
+  // and profit-booking/gold/milestone alerts are already deduped by their
+  // own log tables, so re-running this is always safe to repeat.
+  const isTest = req.nextUrl.searchParams.get("test") === "1";
+
   if (!isTelegramConfigured()) {
     return NextResponse.json({ ranAt: new Date().toISOString(), ok: false, reason: "Telegram not configured" });
   }
@@ -71,8 +79,8 @@ export async function GET(req: NextRequest) {
     new Date().toLocaleString("en-US", { timeZone: "Asia/Kolkata", hour: "2-digit", hour12: false })
   );
   const todayIst = new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Kolkata" }); // YYYY-MM-DD
-  const runDailyBlock = istHour >= DAILY_ALERT_HOUR_IST;
-  const needsDailyRun = runDailyBlock && (users || []).some((u) => u.last_daily_alert_date !== todayIst);
+  const runDailyBlock = isTest || istHour >= DAILY_ALERT_HOUR_IST;
+  const needsDailyRun = isTest || (runDailyBlock && (users || []).some((u) => u.last_daily_alert_date !== todayIst));
 
   // Dividend auto-log (flips "Upcoming" to "Received" once a record date
   // has passed) used to run inside /api/cron/refresh on every 15-min tick —
@@ -208,7 +216,7 @@ export async function GET(req: NextRequest) {
       let goldDailySent = false;
       let summarySent = false;
 
-      if (runDailyBlock && user.last_daily_alert_date !== todayIst) {
+      if (runDailyBlock && (isTest || user.last_daily_alert_date !== todayIst)) {
         if (holdings.length > 0) {
           const symbols = Array.from(new Set(holdings.map((h) => h.symbol)));
           const dividends = await getDividendsForSymbols(symbols);
@@ -353,7 +361,9 @@ export async function GET(req: NextRequest) {
           summarySent = true;
         }
 
-        await supabaseAdmin.from("users").update({ last_daily_alert_date: todayIst }).eq("id", user.id);
+        if (!isTest) {
+          await supabaseAdmin.from("users").update({ last_daily_alert_date: todayIst }).eq("id", user.id);
+        }
       }
 
       userResult.ok = true;
