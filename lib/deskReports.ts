@@ -71,5 +71,35 @@ export async function fireDeskRoutine(symbols: string[]): Promise<{ fired: boole
   }
 }
 
+// Live price for a desk request. The research routine runs in a sandbox that
+// can't reach quote endpoints, and web search returns prices weeks old, so the
+// dashboard (which can reach Yahoo, same source as the holdings refresh cron)
+// looks the price up and hands it over with the request.
+export type DeskQuote = { price: number; asOf: string; source: string; previousClose: number | null };
+
+export async function getLiveQuote(symbol: string): Promise<DeskQuote | null> {
+  for (const suffix of [".NS", ".BO"]) {
+    try {
+      const res = await fetch(
+        `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol + suffix)}?interval=1d&range=1d`,
+        { headers: { "User-Agent": "Mozilla/5.0" }, cache: "no-store" }
+      );
+      if (!res.ok) continue;
+      const meta = (await res.json())?.chart?.result?.[0]?.meta;
+      const price = meta?.regularMarketPrice;
+      if (typeof price !== "number" || !Number.isFinite(price) || price <= 0) continue;
+      const t = typeof meta?.regularMarketTime === "number" ? new Date(meta.regularMarketTime * 1000) : new Date();
+      const prev = meta?.chartPreviousClose ?? meta?.previousClose;
+      return {
+        price: Math.round(price * 100) / 100,
+        asOf: t.toISOString(),
+        source: suffix === ".NS" ? "Yahoo Finance (NSE)" : "Yahoo Finance (BSE)",
+        previousClose: typeof prev === "number" ? prev : null,
+      };
+    } catch {}
+  }
+  return null;
+}
+
 export const deskSecretOk = (secret: string | null) =>
   !!process.env.ANALYST_DESK_INGEST_SECRET && secret === process.env.ANALYST_DESK_INGEST_SECRET;

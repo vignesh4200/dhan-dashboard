@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
-import { DECISIONS, deskSecretOk } from "@/lib/deskReports";
+import { DECISIONS, deskSecretOk, getLiveQuote } from "@/lib/deskReports";
 
 // Receive a finished report from the Analyst Desk routine.
 //
@@ -32,13 +32,20 @@ export async function POST(req: NextRequest) {
   } else {
     const reportMarkdown = str(b?.reportMarkdown, 200_000);
     if (!reportMarkdown) return NextResponse.json({ error: "missing reportMarkdown" }, { status: 400 });
+    // Safety net: if the routine couldn't give a price, fill the card's CMP
+    // with a live one rather than leaving it blank.
+    let currentPrice = num(b.currentPrice);
+    if (currentPrice === null) {
+      const { data: row } = await supabaseAdmin.from("analyst_desk_reports").select("symbol").eq("id", id).maybeSingle();
+      if (row?.symbol) currentPrice = (await getLiveQuote(row.symbol))?.price ?? null;
+    }
     const decision = String(b?.decision || "").toUpperCase();
     update = {
       status: "done",
       company: str(b.company, 200),
       decision: (DECISIONS as readonly string[]).includes(decision) ? decision : null,
       conviction: num(b.conviction),
-      current_price: num(b.currentPrice),
+      current_price: currentPrice,
       fair_value_low: num(b.fairValueLow),
       fair_value_high: num(b.fairValueHigh),
       horizon: str(b.horizon, 100),

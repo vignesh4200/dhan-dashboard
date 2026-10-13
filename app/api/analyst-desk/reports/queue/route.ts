@@ -1,13 +1,17 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
-import { deskSecretOk } from "@/lib/deskReports";
+import { deskSecretOk, getLiveQuote } from "@/lib/deskReports";
 
 // Claim queued report requests — called by the Analyst Desk routine.
 //
 // POST https://your-app.vercel.app/api/analyst-desk/reports/queue
 // Header: x-desk-secret: ANALYST_DESK_INGEST_SECRET
 //
-// Returns up to 8 requests and marks them 'running'. Rows left 'running' for
+// Returns up to 8 requests and marks them 'running'. Each request carries a
+// live price ("cmp") looked up here, because the routine's sandbox can't
+// reach quote sites and web search gives stale prices. If the live lookup
+// fails, the last price from your holdings snapshot is used instead (held
+// stocks only), marked with its own as-of time. Rows left 'running' for
 // over an hour (a run that died) are handed out again.
 export const dynamic = "force-dynamic";
 
@@ -36,13 +40,14 @@ export async function POST(req: NextRequest) {
   // Investor context per request: position (if held) and any logged broker call.
   const userIds = Array.from(new Set(rows.map((r) => r.user_id)));
   const holdingsByUser = new Map<string, any[]>();
+  const snapshotAtByUser = new Map<string, string | null>();
   const callsByUser = new Map<string, any[]>();
   await Promise.all(
     userIds.map(async (uid) => {
       const [{ data: snap }, { data: calls }] = await Promise.all([
         supabaseAdmin
           .from("portfolio_snapshots")
-          .select("holdings")
+          .select("holdings, captured_at")
           .eq("user_id", uid)
           .order("captured_at", { ascending: false })
           .limit(1)
@@ -50,19 +55,31 @@ export async function POST(req: NextRequest) {
         supabaseAdmin.from("broker_calls").select("symbol, broker_name, call_type").eq("user_id", uid),
       ]);
       holdingsByUser.set(uid, snap?.holdings || []);
+      snapshotAtByUser.set(uid, snap?.captured_at || null);
       callsByUser.set(uid, calls || []);
     })
   );
 
+  const symbols = Array.from(new Set(rows.map((r) => r.symbol)));
+  const quotes = new Map(await Promise.all(symbols.map(async (s) => [s, await getLiveQuote(s)] as const)));
+
   const requests = rows.map((r) => {
     const holding = (holdingsByUser.get(r.user_id) || []).find((h: any) => String(h.symbol).toUpperCase() === r.symbol);
     const call = (callsByUser.get(r.user_id) || []).find((c: any) => String(c.symbol).toUpperCase() === r.symbol);
+    const live = quotes.get(r.symbol) || null;
+    const snapLtp = holding && typeof holding.ltp === "number" && holding.ltp > 0 ? holding.ltp : null;
+    const cmp = live
+      ? live
+      : snapLtp
+      ? { price: snapLtp, asOf: snapshotAtByUser.get(r.user_id) || null, source: "dhan-dashboard holdings snapshot", previousClose: null }
+      : null;
     return {
       id: r.id,
       symbol: r.symbol,
       requestedAt: r.created_at,
       held: holding ? { qty: holding.qty ?? null, avgCost: holding.avg ?? null } : null,
       brokerCall: call ? { broker: call.broker_name, callType: call.call_type } : null,
+      cmp,
     };
   });
 
