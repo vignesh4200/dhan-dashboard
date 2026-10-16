@@ -20,7 +20,7 @@
   background:radial-gradient(120% 90% at 50% 30%,#3a2a10 0%,#1a130a 60%,#0e0b07 100%);
   box-shadow:inset 0 0 0 10px #1c1f26,inset 0 0 40px #000;
   display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px}
-.granted{font:500 11px/1 var(--font-mono);letter-spacing:.2em;text-transform:uppercase;color:var(--v-gold)}
+.granted{font:500 11px/1 var(--font-code);letter-spacing:.2em;text-transform:uppercase;color:var(--v-gold)}
 .bars{display:grid;grid-template-columns:repeat(3,58px);gap:6px 4px;justify-content:center}
 .bar{height:22px;border-radius:3px;background:linear-gradient(180deg,#ffd77a,#e5a93a 55%,#a86b14);box-shadow:0 2px 0 #6b440c,inset 0 1px 0 #fff5}
 .crown{grid-column:2}
@@ -43,7 +43,7 @@
 .unbolt .bolt{transform:translateX(-12px)}
 
 .head{display:flex;justify-content:space-between;align-items:center}
-.lbl{font:500 10.5px/1 var(--font-mono);letter-spacing:.16em;text-transform:uppercase;color:var(--v-muted)}
+.lbl{font:500 10.5px/1 var(--font-code);letter-spacing:.16em;text-transform:uppercase;color:var(--v-muted)}
 .led{width:9px;height:9px;border-radius:50%;background:#5a4a1a;box-shadow:0 0 0 2px #0005;transition:.3s}
 .amber{background:var(--v-gold);box-shadow:0 0 10px var(--v-gold)}
 .green{background:var(--v-ok);box-shadow:0 0 12px var(--v-ok)}
@@ -56,12 +56,12 @@
 .panel{display:flex;flex-direction:column;gap:10px}
 .screen{background:#0b0d10;border-radius:10px;box-shadow:inset 0 2px 6px #000,0 1px 0 #ffffff14;padding:12px 14px;display:flex;align-items:center;gap:10px}
 .screen:focus-within{outline:1px solid var(--v-gold-deep)}
-.cc{font:500 15px var(--font-mono);color:var(--v-muted)}
-.screen input{all:unset;flex:1;min-width:0;font:500 18px var(--font-mono);letter-spacing:.12em;color:#ffd77a;caret-color:var(--v-gold)}
+.cc{font:500 15px var(--font-code);color:var(--v-muted)}
+.screen input{all:unset;flex:1;min-width:0;font:500 18px var(--font-code);letter-spacing:.12em;color:#ffd77a;caret-color:var(--v-gold)}
 .screen input::placeholder{color:#4a4f59}
 .otp{display:grid;grid-template-columns:repeat(6,1fr);gap:6px}
 .otp input{all:unset;box-sizing:border-box;width:100%;text-align:center;padding:12px 0;border-radius:8px;background:#0b0d10;
-  box-shadow:inset 0 2px 6px #000,0 1px 0 #ffffff14;font:500 20px var(--font-mono);color:#ffd77a;caret-color:var(--v-gold)}
+  box-shadow:inset 0 2px 6px #000,0 1px 0 #ffffff14;font:500 20px var(--font-code);color:#ffd77a;caret-color:var(--v-gold)}
 .otp input:focus{outline:1px solid var(--v-gold-deep)}
 
 .unlock{all:unset;box-sizing:border-box;cursor:pointer;text-align:center;padding:12px;border-radius:10px;

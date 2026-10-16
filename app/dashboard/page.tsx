@@ -564,6 +564,7 @@ export default function DashboardOverview() {
     }
   }
 
+  const fyPayouts = dividendReceived.filter((r: any) => new Date(r.record_date) >= fyStart).length;
   const boughtTracks = tracks.filter((tr: any) => tr.status === "bought");
   const trackedPnl = boughtTracks.reduce((s: number, tr: any) => s + (tr.pnl ?? 0), 0);
   const mfGainPct = mfTotalInvested > 0 ? ((mfTotalCurrent - mfTotalInvested) / mfTotalInvested) * 100 : 0;
@@ -575,61 +576,55 @@ export default function DashboardOverview() {
         Last synced {new Date(data.captured_at).toLocaleString("en-IN", { dateStyle: "medium", timeStyle: "short" })}
       </div>
 
-      <div className="vault-summary">
+      <div className="kpi-grid">
         <div className="vault-card vault-hero">
           <span className="vault-rivet" style={{ top: 12, left: 12 }} />
           <span className="vault-rivet" style={{ top: 12, right: 12 }} />
           <span className="vault-rivet" style={{ bottom: 12, left: 12 }} />
           <span className="vault-rivet" style={{ bottom: 12, right: 12 }} />
           <div className="vault-label">Total portfolio value</div>
-          <div className="vault-big">{inr(combinedTotal, 2)}</div>
-          <div className="vault-sub" style={{ color: data.day_pnl >= 0 ? "var(--gain)" : "var(--loss)" }}>
-            {sign(data.day_pnl)}{inr(Math.abs(data.day_pnl))} today
-          </div>
-          {(mfHoldings.length > 0 || goldHoldings.length > 0 || dividendReceived.length > 0) && (
-            <div className="vault-breakdown">
-              <span><b style={{ background: "var(--c-stocks)" }} />Stocks {inr(data.total_current)}</span>
-              {mfHoldings.length > 0 && <span><b style={{ background: "var(--c-mf)" }} />MF {inr(mfTotalCurrent)}</span>}
-              {goldHoldings.length > 0 && <span><b style={{ background: "var(--c-gold)" }} />Gold {inr(goldTotalCurrent)}</span>}
-              {dividendReceived.length > 0 && <span><b style={{ background: "var(--c-div)" }} />Dividends FY {inr(dividendReceivedThisFY)}</span>}
+          <div className="vault-big">{inr(combinedTotal)}</div>
+          <div className="vault-hero-row">
+            <div>
+              <div className="vault-label">Overall P&amp;L</div>
+              <div className="val" style={{ color: combinedGain >= 0 ? "var(--gain)" : "var(--loss)" }}>
+                {sign(combinedGain)}{inr(Math.abs(combinedGain))} ({sign(combinedGainPct)}{Math.abs(combinedGainPct).toFixed(2)}%)
+              </div>
             </div>
-          )}
-        </div>
-
-        <div className="vault-card">
-          <div className="vault-label">Overall P&amp;L</div>
-          <div className="vault-mid" style={{ color: combinedGain >= 0 ? "var(--gain)" : "var(--loss)" }}>
-            {sign(combinedGain)}{inr(Math.abs(combinedGain))}
-          </div>
-          <div className="vault-sub" style={{ color: combinedGain >= 0 ? "var(--gain)" : "var(--loss)" }}>
-            {sign(combinedGainPct)}{Math.abs(combinedGainPct).toFixed(2)}% <span style={{ color: "var(--text-muted)" }}>on {inr(combinedInvested)}</span>
+            <div>
+              <div className="vault-label">Invested</div>
+              <div className="val">{inr(combinedInvested)}</div>
+            </div>
           </div>
         </div>
 
         <Link href="/dashboard/dividends" className="vault-card" style={{ textDecoration: "none", color: "inherit" }}>
           <div className="vault-label">Dividends this FY</div>
           <div className="vault-mid">{inr(dividendReceivedThisFY)}</div>
-          <div className="vault-sub" style={{ color: "var(--text-muted)" }}>
+          <div className="vault-sub">
             {expectedThisMonth > 0
-              ? `+${inr(expectedThisMonth)} expected ${thisMonthName}`
-              : `${dividendReceived.length} payout${dividendReceived.length === 1 ? "" : "s"} received`}
+              ? <><span style={{ color: "var(--gain)" }}>+{inr(expectedThisMonth)}</span> <span className="muted">expected in {thisMonthName}</span></>
+              : <span className="muted">{fyPayouts} payout{fyPayouts === 1 ? "" : "s"} received</span>}
           </div>
         </Link>
 
         <Link href="/dashboard/signals" className="vault-card" style={{ textDecoration: "none", color: "inherit" }}>
           <div className="vault-label">Open signals</div>
           <div className="vault-mid">{boughtTracks.length}</div>
-          <div className="vault-sub" style={{ color: boughtTracks.length === 0 ? "var(--text-muted)" : trackedPnl >= 0 ? "var(--gain)" : "var(--loss)" }}>
-            {boughtTracks.length === 0 ? "none marked as bought" : `${sign(trackedPnl)}${inr(Math.abs(trackedPnl))} live P&L`}
+          <div className="vault-sub">
+            {boughtTracks.length === 0
+              ? <span className="muted">None marked as bought</span>
+              : <span style={{ color: trackedPnl >= 0 ? "var(--gain)" : "var(--loss)" }}>{sign(trackedPnl)}{inr(Math.abs(trackedPnl))} <span className="muted">live P&amp;L</span></span>}
           </div>
         </Link>
       </div>
 
-      <div className="stat-grid" style={{ marginTop: 16 }}>
-        <div className="stat-card"><div className="stat-label">Total Return</div><div className="stat-value">{inr(data.total_pnl)}</div><div style={{ fontSize: 11.5, marginTop: 5, color: totalPnlPct >= 0 ? "var(--gain)" : "var(--loss)" }}>{sign(totalPnlPct)}{Math.abs(totalPnlPct).toFixed(1)}%</div></div>
-        <div className="stat-card"><div className="stat-label">Invested</div><div className="stat-value">{inr(data.total_invested)}</div><div style={{ fontSize: 11.5, marginTop: 5, color: "var(--text-muted)" }}>{data.holdings.length} positions</div></div>
-        <div className="stat-card"><div className="stat-label">Day Change</div><div className="stat-value">{sign(data.day_pnl)}{inr(Math.abs(data.day_pnl))}</div></div>
-        <div className="stat-card"><div className="stat-label">In Profit</div><div className="stat-value">{inProfitPct.toFixed(0)}%</div><div style={{ fontSize: 11.5, marginTop: 5, color: "var(--text-muted)" }}>of holdings</div></div>
+      <div className="section-label">Stocks (Dhan)</div>
+      <div className="stat-grid" style={{ marginTop: 14 }}>
+        <div className="stat-card"><div className="stat-label">Total return</div><div className="stat-value" style={{ color: data.total_pnl >= 0 ? "var(--gain)" : "var(--loss)" }}>{sign(data.total_pnl)}{inr(Math.abs(data.total_pnl))}</div><div className="stat-sub" style={{ color: totalPnlPct >= 0 ? "var(--gain)" : "var(--loss)" }}>{sign(totalPnlPct)}{Math.abs(totalPnlPct).toFixed(1)}%</div></div>
+        <div className="stat-card"><div className="stat-label">Invested</div><div className="stat-value">{inr(data.total_invested)}</div><div className="stat-sub">{data.holdings.length} positions</div></div>
+        <div className="stat-card"><div className="stat-label">Day change</div><div className="stat-value" style={{ color: data.day_pnl >= 0 ? "var(--gain)" : "var(--loss)" }}>{sign(data.day_pnl)}{inr(Math.abs(data.day_pnl))}</div><div className="stat-sub">today</div></div>
+        <div className="stat-card"><div className="stat-label">In profit</div><div className="stat-value">{inProfitPct.toFixed(0)}%</div><div className="stat-sub">of holdings</div></div>
       </div>
 
       <div className="list-card" style={{ marginTop: 18 }}>
@@ -656,7 +651,7 @@ export default function DashboardOverview() {
           <Link href="/dashboard/dividends" className="asset-tile">
             <div className="k"><b style={{ background: "var(--c-div)" }} />Dividends</div>
             <div className="v">{inr(dividendReceivedThisFY)}</div>
-            <div className="p" style={{ color: "var(--text-muted)" }}>this FY, {dividendReceived.length} payouts</div>
+            <div className="p" style={{ color: "var(--text-muted)" }}>this FY · {fyPayouts} payout{fyPayouts === 1 ? "" : "s"}</div>
             <Sparkline values={divTrend} color="var(--c-div)" />
           </Link>
         </div>
