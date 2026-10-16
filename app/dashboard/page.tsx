@@ -49,6 +49,38 @@ function bandBetween(topCoords: { x: number; y: number }[], bottomCoords: { x: n
   return `${top} ${bottomPath} Z`;
 }
 
+function Sparkline({ values, color }: { values: number[]; color: string }) {
+  if (values.length < 2) return <svg viewBox="0 0 120 30" aria-hidden="true" />;
+  const w = 120, h = 30, mn = Math.min(...values), mx = Math.max(...values), span = mx - mn || 1;
+  const pts = values.map((v, i) => [(i * w) / (values.length - 1), h - 3 - ((v - mn) / span) * (h - 6)]);
+  const d = pts.map((p, i) => `${i ? "L" : "M"}${p[0].toFixed(1)} ${p[1].toFixed(1)}`).join(" ");
+  const last = pts[pts.length - 1];
+  return (
+    <svg viewBox={`0 0 ${w} ${h}`} preserveAspectRatio="none" aria-hidden="true">
+      <path d={`${d} L${w} ${h} L0 ${h}Z`} fill={color} opacity="0.14" />
+      <path d={d} fill="none" stroke={color} strokeWidth="1.6" vectorEffect="non-scaling-stroke" />
+      <circle cx={last[0]} cy={last[1]} r="2.4" fill={color} />
+    </svg>
+  );
+}
+
+// Last ~30 days of a performance series, thinned to at most 40 points.
+function trendOf(points: { captured_at: string; current: number }[]): number[] {
+  const cutoff = Date.now() - 30 * 86400000;
+  const recent = points.filter((p) => new Date(p.captured_at).getTime() >= cutoff);
+  const src = recent.length >= 2 ? recent : points.slice(-40);
+  const step = Math.max(1, Math.ceil(src.length / 40));
+  const out = src.filter((_, i) => i % step === 0).map((p) => p.current);
+  if (src.length && out[out.length - 1] !== src[src.length - 1].current) out.push(src[src.length - 1].current);
+  return out;
+}
+
+// Per-share amount from an NSE dividend label ("Rs 3.25", "Re 1 Per Share").
+function perShareOf(label: string | undefined): number | null {
+  const m = (label || "").match(/R[se]\.?\s*([\d.]+)/i);
+  return m ? parseFloat(m[1]) : null;
+}
+
 function PerfChart() {
   const [assetType, setAssetType] = useState("all");
   const [range, setRange] = useState("1M");
@@ -107,7 +139,7 @@ function PerfChart() {
           onClick={() => setAssetType(t.key)}
           style={{
             background: assetType === t.key ? "var(--purple)" : "transparent",
-            color: assetType === t.key ? "#fff" : "var(--text-muted)",
+            color: assetType === t.key ? "var(--gold-ink)" : "var(--text-muted)",
             border: assetType === t.key ? "none" : "1px solid var(--border)",
             borderRadius: 8, padding: "6px 14px", fontSize: 12,
             fontWeight: assetType === t.key ? 600 : 400, cursor: "pointer",
@@ -127,7 +159,7 @@ function PerfChart() {
           onClick={() => selectPreset(r.label)}
           style={{
             background: !usingCustomRange && range === r.label ? "var(--purple)" : "transparent",
-            color: !usingCustomRange && range === r.label ? "#fff" : "var(--text-muted)",
+            color: !usingCustomRange && range === r.label ? "var(--gold-ink)" : "var(--text-muted)",
             border: !usingCustomRange && range === r.label ? "none" : "1px solid var(--border)",
             borderRadius: 8, padding: "5px 12px", fontSize: 11.5,
             fontWeight: !usingCustomRange && range === r.label ? 600 : 400, cursor: "pointer",
@@ -163,7 +195,7 @@ function PerfChart() {
         disabled={!customFrom || !customTo}
         style={{
           background: usingCustomRange ? "var(--purple)" : "transparent",
-          color: usingCustomRange ? "#fff" : "var(--text-muted)",
+          color: usingCustomRange ? "var(--gold-ink)" : "var(--text-muted)",
           border: usingCustomRange ? "none" : "1px solid var(--border)",
           borderRadius: 8, padding: "5px 12px", fontSize: 11.5,
           fontWeight: usingCustomRange ? 600 : 400,
@@ -295,8 +327,8 @@ function PerfChart() {
       >
         <defs>
           <linearGradient id="lineGrad" x1="0" y1="0" x2="1" y2="0">
-            <stop offset="0%" stopColor="#8177E8" />
-            <stop offset="100%" stopColor="#B0A6FF" />
+            <stop offset="0%" stopColor="#d9952a" />
+            <stop offset="100%" stopColor="#ffd88a" />
           </linearGradient>
           <filter id="chartGlow" x="-50%" y="-50%" width="200%" height="200%">
             <feGaussianBlur stdDeviation="4" result="blur" />
@@ -320,8 +352,8 @@ function PerfChart() {
         <path d={investedPath} fill="none" stroke="var(--text-muted)" strokeWidth="1.75" strokeLinecap="round" strokeDasharray="5,4" />
         <path d={currentPath} fill="none" stroke="url(#lineGrad)" strokeWidth="3" strokeLinecap="round" filter="url(#chartGlow)" />
 
-        <circle cx={currentCoords[currentCoords.length - 1].x} cy={currentCoords[currentCoords.length - 1].y} r="8" fill="#B0A6FF" opacity="0.25" />
-        <circle cx={currentCoords[currentCoords.length - 1].x} cy={currentCoords[currentCoords.length - 1].y} r="4.5" fill="#fff" stroke="#8177E8" strokeWidth="2.5" />
+        <circle cx={currentCoords[currentCoords.length - 1].x} cy={currentCoords[currentCoords.length - 1].y} r="8" fill="#e5a93a" opacity="0.25" />
+        <circle cx={currentCoords[currentCoords.length - 1].x} cy={currentCoords[currentCoords.length - 1].y} r="4.5" fill="#fff" stroke="#e5a93a" strokeWidth="2.5" />
 
         <text
           x={currentCoords[currentCoords.length - 1].x - 10}
@@ -349,7 +381,7 @@ function PerfChart() {
           return (
             <g>
               <line x1={currentCoords[hoverIdx].x} y1={padTop} x2={currentCoords[hoverIdx].x} y2={padTop + plotH} stroke="var(--text-muted)" strokeWidth="1" strokeDasharray="3,3" />
-              <circle cx={currentCoords[hoverIdx].x} cy={currentCoords[hoverIdx].y} r="5" fill="#fff" stroke="#8177E8" strokeWidth="2.5" />
+              <circle cx={currentCoords[hoverIdx].x} cy={currentCoords[hoverIdx].y} r="5" fill="#fff" stroke="#e5a93a" strokeWidth="2.5" />
               <circle cx={investedCoords[hoverIdx].x} cy={investedCoords[hoverIdx].y} r="4" fill="var(--text-muted)" />
               <rect x={boxX} y={padTop + 4} width="200" height="52" rx="8" fill="var(--bg)" stroke="var(--border)" strokeWidth="1" />
               <text x={boxX + 12} y={padTop + 22} fontSize="10" fill="var(--text-muted)">{formatLabel(hp.captured_at)}</text>
@@ -381,6 +413,8 @@ export default function DashboardOverview() {
   const [goldHoldings, setGoldHoldings] = useState<any[]>([]);
   const [dividendReceived, setDividendReceived] = useState<any[]>([]);
   const [dividendReceivedThisFY, setDividendReceivedThisFY] = useState(0);
+  const [trends, setTrends] = useState<{ stocks: number[]; mf: number[]; gold: number[] }>({ stocks: [], mf: [], gold: [] });
+  const [tracks, setTracks] = useState<any[]>([]);
 
   useEffect(() => {
     fetch("/api/portfolio").then((r) => {
@@ -400,6 +434,17 @@ export default function DashboardOverview() {
         setDividendReceived(d.received || []);
         setDividendReceivedThisFY(d.receivedThisFY || 0);
       });
+      // Small trend lines on the asset tiles.
+      (["stocks", "mf", "gold"] as const).forEach((type) => {
+        fetch(`/api/performance?type=${type}`)
+          .then((r) => r.json())
+          .then((d) => setTrends((prev) => ({ ...prev, [type]: trendOf(d.points || []) })))
+          .catch(() => {});
+      });
+      fetch("/api/signals/track")
+        .then((r) => (r.status === 401 ? null : r.json()))
+        .then((d) => d && setTracks(d.tracks || []))
+        .catch(() => {});
     });
   }, []);
 
@@ -467,45 +512,117 @@ export default function DashboardOverview() {
 
   const biggestImpact = [...data.holdings].sort((a: any, b: any) => Math.abs(b.pnl) - Math.abs(a.pnl)).slice(0, 5);
 
-  // Monthly dividend income breakdown for the chart — last 6 months.
-  const monthlyDividends: { label: string; amount: number }[] = [];
-  for (let i = 5; i >= 0; i--) {
-    const d = new Date();
-    d.setMonth(d.getMonth() - i);
-    const label = d.toLocaleDateString("en-IN", { month: "short" });
-    const monthStart = new Date(d.getFullYear(), d.getMonth(), 1);
-    const monthEnd = new Date(d.getFullYear(), d.getMonth() + 1, 0, 23, 59, 59);
+  // Expected payouts from upcoming dividend events: per-share × shares held,
+  // bucketed by the month of the record date.
+  const monthKey = (d: Date) => `${d.getFullYear()}-${d.getMonth()}`;
+  const expectedByMonth: Record<string, number> = {};
+  events
+    .filter((e: any) => e.type === "dividend")
+    .forEach((e: any) => {
+      const holding = data.holdings.find((h: any) => h.symbol === e.symbol);
+      const ps = perShareOf(e.label);
+      const when = new Date(e.date);
+      if (!holding || ps === null || isNaN(when.getTime())) return;
+      const k = monthKey(when);
+      expectedByMonth[k] = (expectedByMonth[k] || 0) + ps * holding.qty;
+    });
+
+  // Monthly dividend chart: last 6 months received, with expected stacked on
+  // top; next month is added too when a payout is already announced for it.
+  const monthlyDividends: { label: string; amount: number; expected: number }[] = [];
+  const today = new Date();
+  for (let i = 5; i >= -1; i--) {
+    const monthStart = new Date(today.getFullYear(), today.getMonth() - i, 1);
+    const monthEnd = new Date(today.getFullYear(), today.getMonth() - i + 1, 0, 23, 59, 59);
+    const expected = expectedByMonth[monthKey(monthStart)] || 0;
+    if (i === -1 && expected === 0) break;
+    const label = monthStart.toLocaleDateString("en-IN", { month: "short" });
     const amount = dividendReceived
       .filter((r: any) => {
         const rd = new Date(r.record_date);
         return rd >= monthStart && rd <= monthEnd;
       })
       .reduce((s: number, r: any) => s + Number(r.amount), 0);
-    monthlyDividends.push({ label, amount });
+    monthlyDividends.push({ label, amount, expected });
   }
-  const maxMonthlyDividend = Math.max(...monthlyDividends.map((m) => m.amount), 1);
+  const maxMonthlyDividend = Math.max(...monthlyDividends.map((m) => m.amount + m.expected), 1);
+  const anyExpected = monthlyDividends.some((m) => m.expected > 0);
+  const expectedThisMonth = expectedByMonth[monthKey(today)] || 0;
+  const thisMonthName = today.toLocaleDateString("en-IN", { month: "short" });
+
+  // Cumulative received this FY by month, for the Dividends tile trend line.
+  const fyStart = new Date(today.getMonth() >= 3 ? today.getFullYear() : today.getFullYear() - 1, 3, 1);
+  const divTrend: number[] = [];
+  {
+    let run = 0;
+    for (let m = new Date(fyStart); m <= today; m = new Date(m.getFullYear(), m.getMonth() + 1, 1)) {
+      const mEnd = new Date(m.getFullYear(), m.getMonth() + 1, 0, 23, 59, 59);
+      run += dividendReceived
+        .filter((r: any) => { const rd = new Date(r.record_date); return rd >= m && rd <= mEnd; })
+        .reduce((s: number, r: any) => s + Number(r.amount), 0);
+      divTrend.push(run);
+    }
+  }
+
+  const boughtTracks = tracks.filter((tr: any) => tr.status === "bought");
+  const trackedPnl = boughtTracks.reduce((s: number, tr: any) => s + (tr.pnl ?? 0), 0);
+  const mfGainPct = mfTotalInvested > 0 ? ((mfTotalCurrent - mfTotalInvested) / mfTotalInvested) * 100 : 0;
 
   return (
     <div>
-      <div style={{ fontFamily: "var(--font-display)", fontSize: 22, fontWeight: 600 }}>Good day, Vignesh 👋</div>
+      <div style={{ fontFamily: "var(--font-display)", fontSize: 22, fontWeight: 600 }}>Good day, Vignesh</div>
       <div style={{ color: "var(--text-muted)", fontSize: 13, marginTop: 4 }}>
         Last synced {new Date(data.captured_at).toLocaleString("en-IN", { dateStyle: "medium", timeStyle: "short" })}
       </div>
 
-      <div style={{ marginTop: 22, borderRadius: 20, padding: "28px 30px", background: "linear-gradient(135deg,#6B5CE6 0%,#4B3FB0 100%)" }}>
-        <div style={{ fontSize: 13, opacity: 0.85 }}>Total Portfolio Value</div>
-        <div style={{ fontFamily: "var(--font-display)", fontSize: 38, fontWeight: 700, marginTop: 10, color: "#fff" }}>{inr(combinedTotal, 2)}</div>
-        <div style={{ marginTop: 8, fontSize: 13.5, color: data.day_pnl >= 0 ? "#B9F5DC" : "#FBD4CE", fontWeight: 600 }}>
-          {sign(data.day_pnl)}{inr(Math.abs(data.day_pnl))} today
-        </div>
-        {(mfHoldings.length > 0 || goldHoldings.length > 0 || dividendReceived.length > 0) && (
-          <div style={{ marginTop: 14, display: "flex", gap: 18, fontSize: 12, opacity: 0.9, color: "#fff", flexWrap: "wrap" }}>
-            <span>📈 Stocks: {inr(data.total_current)}</span>
-            {mfHoldings.length > 0 && <span>🏦 Mutual Funds: {inr(mfTotalCurrent)}</span>}
-            {goldHoldings.length > 0 && <span>🪙 Gold: {inr(goldTotalCurrent)}</span>}
-            {dividendReceived.length > 0 && <span>💰 Dividends (This FY): {inr(dividendReceivedThisFY)}</span>}
+      <div className="vault-summary">
+        <div className="vault-card vault-hero">
+          <span className="vault-rivet" style={{ top: 12, left: 12 }} />
+          <span className="vault-rivet" style={{ top: 12, right: 12 }} />
+          <span className="vault-rivet" style={{ bottom: 12, left: 12 }} />
+          <span className="vault-rivet" style={{ bottom: 12, right: 12 }} />
+          <div className="vault-label">Total portfolio value</div>
+          <div className="vault-big">{inr(combinedTotal, 2)}</div>
+          <div className="vault-sub" style={{ color: data.day_pnl >= 0 ? "var(--gain)" : "var(--loss)" }}>
+            {sign(data.day_pnl)}{inr(Math.abs(data.day_pnl))} today
           </div>
-        )}
+          {(mfHoldings.length > 0 || goldHoldings.length > 0 || dividendReceived.length > 0) && (
+            <div className="vault-breakdown">
+              <span><b style={{ background: "var(--c-stocks)" }} />Stocks {inr(data.total_current)}</span>
+              {mfHoldings.length > 0 && <span><b style={{ background: "var(--c-mf)" }} />MF {inr(mfTotalCurrent)}</span>}
+              {goldHoldings.length > 0 && <span><b style={{ background: "var(--c-gold)" }} />Gold {inr(goldTotalCurrent)}</span>}
+              {dividendReceived.length > 0 && <span><b style={{ background: "var(--c-div)" }} />Dividends FY {inr(dividendReceivedThisFY)}</span>}
+            </div>
+          )}
+        </div>
+
+        <div className="vault-card">
+          <div className="vault-label">Overall P&amp;L</div>
+          <div className="vault-mid" style={{ color: combinedGain >= 0 ? "var(--gain)" : "var(--loss)" }}>
+            {sign(combinedGain)}{inr(Math.abs(combinedGain))}
+          </div>
+          <div className="vault-sub" style={{ color: combinedGain >= 0 ? "var(--gain)" : "var(--loss)" }}>
+            {sign(combinedGainPct)}{Math.abs(combinedGainPct).toFixed(2)}% <span style={{ color: "var(--text-muted)" }}>on {inr(combinedInvested)}</span>
+          </div>
+        </div>
+
+        <Link href="/dashboard/dividends" className="vault-card" style={{ textDecoration: "none", color: "inherit" }}>
+          <div className="vault-label">Dividends this FY</div>
+          <div className="vault-mid">{inr(dividendReceivedThisFY)}</div>
+          <div className="vault-sub" style={{ color: "var(--text-muted)" }}>
+            {expectedThisMonth > 0
+              ? `+${inr(expectedThisMonth)} expected ${thisMonthName}`
+              : `${dividendReceived.length} payout${dividendReceived.length === 1 ? "" : "s"} received`}
+          </div>
+        </Link>
+
+        <Link href="/dashboard/signals" className="vault-card" style={{ textDecoration: "none", color: "inherit" }}>
+          <div className="vault-label">Open signals</div>
+          <div className="vault-mid">{boughtTracks.length}</div>
+          <div className="vault-sub" style={{ color: boughtTracks.length === 0 ? "var(--text-muted)" : trackedPnl >= 0 ? "var(--gain)" : "var(--loss)" }}>
+            {boughtTracks.length === 0 ? "none marked as bought" : `${sign(trackedPnl)}${inr(Math.abs(trackedPnl))} live P&L`}
+          </div>
+        </Link>
       </div>
 
       <div className="stat-grid" style={{ marginTop: 16 }}>
@@ -517,27 +634,31 @@ export default function DashboardOverview() {
 
       <div className="list-card" style={{ marginTop: 18 }}>
         <div className="list-head"><div className="list-title">Asset Overview</div></div>
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 12 }}>
-          <div style={{ background: "rgba(107,92,230,0.14)", borderRadius: 12, padding: 14 }}>
-            <div style={{ fontSize: 11, color: "var(--text-muted)", marginBottom: 6 }}>📈 Stocks</div>
-            <div style={{ fontFamily: "var(--font-mono)", fontSize: 17, fontWeight: 700 }}>{inr(data.total_current)}</div>
-            <div style={{ fontSize: 11, marginTop: 3, color: totalPnlPct >= 0 ? "var(--gain)" : "var(--loss)" }}>{sign(totalPnlPct)}{Math.abs(totalPnlPct).toFixed(1)}%</div>
-          </div>
-          <div style={{ background: "rgba(92,168,230,0.14)", borderRadius: 12, padding: 14 }}>
-            <div style={{ fontSize: 11, color: "var(--text-muted)", marginBottom: 6 }}>🏦 Mutual Funds</div>
-            <div style={{ fontFamily: "var(--font-mono)", fontSize: 17, fontWeight: 700 }}>{inr(mfTotalCurrent)}</div>
-            <div style={{ fontSize: 11, marginTop: 3, color: (mfTotalCurrent - mfTotalInvested) >= 0 ? "var(--gain)" : "var(--loss)" }}>{sign(mfTotalInvested > 0 ? ((mfTotalCurrent - mfTotalInvested) / mfTotalInvested) * 100 : 0)}{Math.abs(mfTotalInvested > 0 ? ((mfTotalCurrent - mfTotalInvested) / mfTotalInvested) * 100 : 0).toFixed(1)}%</div>
-          </div>
-          <div style={{ background: "var(--gold-soft)", borderRadius: 12, padding: 14 }}>
-            <div style={{ fontSize: 11, color: "var(--text-muted)", marginBottom: 6 }}>🪙 Gold</div>
-            <div style={{ fontFamily: "var(--font-mono)", fontSize: 17, fontWeight: 700 }}>{inr(goldTotalCurrent)}</div>
-            <div style={{ fontSize: 11, marginTop: 3, color: goldTotalGainPct >= 0 ? "var(--gain)" : "var(--loss)" }}>{sign(goldTotalGainPct)}{Math.abs(goldTotalGainPct).toFixed(1)}%</div>
-          </div>
-          <div style={{ background: "rgba(52,211,153,0.14)", borderRadius: 12, padding: 14 }}>
-            <div style={{ fontSize: 11, color: "var(--text-muted)", marginBottom: 6 }}>💰 Dividends</div>
-            <div style={{ fontFamily: "var(--font-mono)", fontSize: 17, fontWeight: 700 }}>{inr(dividendReceivedThisFY)}</div>
-            <div style={{ fontSize: 11, marginTop: 3, color: "var(--text-muted)" }}>this FY, {dividendReceived.length} payouts</div>
-          </div>
+        <div className="asset-tiles">
+          <Link href="/dashboard/holdings" className="asset-tile">
+            <div className="k"><b style={{ background: "var(--c-stocks)" }} />Stocks</div>
+            <div className="v">{inr(data.total_current)}</div>
+            <div className="p" style={{ color: totalPnlPct >= 0 ? "var(--gain)" : "var(--loss)" }}>{sign(totalPnlPct)}{Math.abs(totalPnlPct).toFixed(1)}%</div>
+            <Sparkline values={trends.stocks} color="var(--c-stocks)" />
+          </Link>
+          <Link href="/dashboard/mutual-funds" className="asset-tile">
+            <div className="k"><b style={{ background: "var(--c-mf)" }} />Mutual Funds</div>
+            <div className="v">{inr(mfTotalCurrent)}</div>
+            <div className="p" style={{ color: mfGainPct >= 0 ? "var(--gain)" : "var(--loss)" }}>{sign(mfGainPct)}{Math.abs(mfGainPct).toFixed(1)}%</div>
+            <Sparkline values={trends.mf} color="var(--c-mf)" />
+          </Link>
+          <Link href="/dashboard/gold" className="asset-tile">
+            <div className="k"><b style={{ background: "var(--c-gold)" }} />Gold</div>
+            <div className="v">{inr(goldTotalCurrent)}</div>
+            <div className="p" style={{ color: goldTotalGainPct >= 0 ? "var(--gain)" : "var(--loss)" }}>{sign(goldTotalGainPct)}{Math.abs(goldTotalGainPct).toFixed(1)}%</div>
+            <Sparkline values={trends.gold} color="var(--c-gold)" />
+          </Link>
+          <Link href="/dashboard/dividends" className="asset-tile">
+            <div className="k"><b style={{ background: "var(--c-div)" }} />Dividends</div>
+            <div className="v">{inr(dividendReceivedThisFY)}</div>
+            <div className="p" style={{ color: "var(--text-muted)" }}>this FY, {dividendReceived.length} payouts</div>
+            <Sparkline values={divTrend} color="var(--c-div)" />
+          </Link>
         </div>
       </div>
 
@@ -604,27 +725,52 @@ export default function DashboardOverview() {
         </div>
       )}
 
-      {dividendReceived.length > 0 && (
+      {(dividendReceived.length > 0 || anyExpected) && (
         <div className="list-card" style={{ marginTop: 18 }}>
-          <div className="list-head"><div className="list-title">Dividend Income by Month</div></div>
-          <svg viewBox="0 0 700 140" style={{ width: "100%", height: 140 }}>
+          <div className="list-head"><div className="list-title">Dividend Income by Month</div><Link href="/dashboard/dividends" className="list-link">View All →</Link></div>
+          <svg viewBox="0 0 700 150" style={{ width: "100%", height: "auto", display: "block" }} role="img" aria-label="Dividend income by month">
+            <defs>
+              <pattern id="divHatch" width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
+                <rect width="6" height="6" fill="var(--gain)" opacity="0.12" />
+                <line x1="0" y1="0" x2="0" y2="6" stroke="var(--gain)" strokeWidth="2" opacity="0.45" />
+              </pattern>
+            </defs>
+            <line x1="0" x2="700" y1="115" y2="115" stroke="var(--border-strong)" />
             {monthlyDividends.map((m, i) => {
-              const barWidth = 80;
-              const gap = (700 - barWidth * 6) / 7;
+              const n = monthlyDividends.length;
+              const barWidth = n > 6 ? 68 : 80;
+              const gap = (700 - barWidth * n) / (n + 1);
               const x = gap + i * (barWidth + gap);
-              const barHeight = maxMonthlyDividend > 0 ? (m.amount / maxMonthlyDividend) * 90 : 0;
-              const y = 105 - barHeight;
+              const hReceived = (m.amount / maxMonthlyDividend) * 90;
+              const hExpected = (m.expected / maxMonthlyDividend) * 90;
+              const base = 115;
+              const total = m.amount + m.expected;
               return (
                 <g key={i}>
-                  <rect x={x} y={y} width={barWidth} height={barHeight} rx="4" fill="var(--gain)" opacity="0.85" />
-                  <text x={x + barWidth / 2} y={y - 6} fontSize="10.5" fontWeight="600" fill="var(--text)" textAnchor="middle">
-                    {m.amount > 0 ? inr(m.amount) : ""}
+                  {m.amount > 0 && <rect x={x} y={base - hReceived} width={barWidth} height={hReceived} rx="4" fill="var(--gain)" opacity="0.85" />}
+                  {m.expected > 0 && (
+                    <rect x={x + 0.75} y={base - hReceived - hExpected + 0.75} width={barWidth - 1.5} height={Math.max(hExpected - 1.5, 2)} rx="4"
+                      fill="url(#divHatch)" stroke="var(--gain)" strokeWidth="1.5" strokeDasharray="4 3" />
+                  )}
+                  <text x={x + barWidth / 2} y={base - hReceived - hExpected - 6} fontSize="10.5" fontWeight="600" fill="var(--text)" textAnchor="middle" fontFamily="var(--font-mono)">
+                    {total > 0 ? inr(total) : ""}
                   </text>
-                  <text x={x + barWidth / 2} y="122" fontSize="11" fill="var(--text-muted)" textAnchor="middle">{m.label}</text>
+                  <text x={x + barWidth / 2} y="133" fontSize="11" fill={m.expected > 0 ? "var(--text)" : "var(--text-muted)"} textAnchor="middle">{m.label}</text>
+                  {m.expected > 0 && (
+                    <text x={x + barWidth / 2} y="146" fontSize="9.5" fill="var(--text-muted)" textAnchor="middle" fontFamily="var(--font-mono)">
+                      {m.amount > 0 ? `${inr(m.expected)} exp.` : "expected"}
+                    </text>
+                  )}
                 </g>
               );
             })}
           </svg>
+          {anyExpected && (
+            <div style={{ display: "flex", gap: 16, fontSize: 11.5, color: "var(--text-muted)", marginTop: 8, flexWrap: "wrap" }}>
+              <span><span style={{ display: "inline-block", width: 10, height: 10, borderRadius: 2, background: "var(--gain)", marginRight: 6, verticalAlign: -1 }} />Received</span>
+              <span><span style={{ display: "inline-block", width: 10, height: 10, borderRadius: 2, background: "var(--gain-soft)", outline: "1.5px dashed var(--gain)", outlineOffset: -1.5, marginRight: 6, verticalAlign: -1 }} />Expected (shares held × announced dividend)</span>
+            </div>
+          )}
         </div>
       )}
 
@@ -677,7 +823,7 @@ export default function DashboardOverview() {
         </div>
       </div>
 
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16, marginTop: 18 }}>
+      <div className="two-col" style={{ marginTop: 18 }}>
         <div className="list-card">
           <div className="list-head"><div className="list-title">Momentum &amp; Volume</div></div>
           {movers.length === 0 ? <div style={{ color: "var(--text-muted)", fontSize: 12.5 }}>No data yet.</div> :

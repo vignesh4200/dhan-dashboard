@@ -49,7 +49,7 @@ function GoldChart({ points }: { points: any[] }) {
               onClick={() => setRange(r.label)}
               style={{
                 background: range === r.label ? "var(--purple)" : "transparent",
-                color: range === r.label ? "#fff" : "var(--text-muted)",
+                color: range === r.label ? "var(--gold-ink)" : "var(--text-muted)",
                 border: range === r.label ? "none" : "1px solid var(--border)",
                 borderRadius: 8, padding: "5px 12px", fontSize: 11.5,
                 fontWeight: range === r.label ? 600 : 400, cursor: "pointer",
@@ -143,7 +143,7 @@ function GoldChart({ points }: { points: any[] }) {
             onClick={() => { setRange(r.label); setHoverIdx(null); }}
             style={{
               background: range === r.label ? "var(--purple)" : "transparent",
-              color: range === r.label ? "#fff" : "var(--text-muted)",
+              color: range === r.label ? "var(--gold-ink)" : "var(--text-muted)",
               border: range === r.label ? "none" : "1px solid var(--border)",
               borderRadius: 8, padding: "5px 12px", fontSize: 11.5,
               fontWeight: range === r.label ? 600 : 400, cursor: "pointer",

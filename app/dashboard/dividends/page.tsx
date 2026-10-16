@@ -171,13 +171,13 @@ export default function DividendsPage() {
           <div style={{ display: "flex", gap: 6 }}>
             <button
               onClick={() => setSortMode("date")}
-              style={{ background: sortMode === "date" ? "var(--purple)" : "transparent", color: sortMode === "date" ? "#fff" : "var(--text-muted)", border: sortMode === "date" ? "none" : "1px solid var(--border)", borderRadius: 8, padding: "5px 12px", fontSize: 11.5, cursor: "pointer" }}
+              style={{ background: sortMode === "date" ? "var(--purple)" : "transparent", color: sortMode === "date" ? "var(--gold-ink)" : "var(--text-muted)", border: sortMode === "date" ? "none" : "1px solid var(--border)", borderRadius: 8, padding: "5px 12px", fontSize: 11.5, cursor: "pointer" }}
             >
               Date
             </button>
             <button
               onClick={() => setSortMode("amount")}
-              style={{ background: sortMode === "amount" ? "var(--purple)" : "transparent", color: sortMode === "amount" ? "#fff" : "var(--text-muted)", border: sortMode === "amount" ? "none" : "1px solid var(--border)", borderRadius: 8, padding: "5px 12px", fontSize: 11.5, cursor: "pointer" }}
+              style={{ background: sortMode === "amount" ? "var(--purple)" : "transparent", color: sortMode === "amount" ? "var(--gold-ink)" : "var(--text-muted)", border: sortMode === "amount" ? "none" : "1px solid var(--border)", borderRadius: 8, padding: "5px 12px", fontSize: 11.5, cursor: "pointer" }}
             >
               Amount
             </button>
@@ -230,7 +230,7 @@ export default function DividendsPage() {
               onClick={() => setReceivedFilter(f.label)}
               style={{
                 background: receivedFilter === f.label ? "var(--purple)" : "transparent",
-                color: receivedFilter === f.label ? "#fff" : "var(--text-muted)",
+                color: receivedFilter === f.label ? "var(--gold-ink)" : "var(--text-muted)",
                 border: receivedFilter === f.label ? "none" : "1px solid var(--border)",
                 borderRadius: 8, padding: "5px 12px", fontSize: 11.5, cursor: "pointer",
               }}

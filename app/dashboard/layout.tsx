@@ -71,7 +71,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
         <div className="dash-sidebar">
           <div className="dash-logo">
             <div className="dash-logo-mark" />
-            <div className="dash-logo-text">Portfolio</div>
+            <div className="dash-logo-text">Dhan</div>
           </div>
           {navItems.map((item) => (
             <Link
