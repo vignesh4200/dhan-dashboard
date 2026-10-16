@@ -52,3 +52,17 @@ create table if not exists upcoming_dividends_cache (
   primary key (user_id, symbol, event_date)
 );
 alter table upcoming_dividends_cache enable row level security;
+
+-- One snapshot per IST day, for the Holdings page's day change and trend lines.
+create or replace function holdings_daily(p_user uuid, p_days int default 31)
+returns table(day date, captured_at timestamptz, holdings jsonb)
+language sql stable
+set search_path = public
+as $$
+  select distinct on ((s.captured_at at time zone 'Asia/Kolkata')::date)
+    (s.captured_at at time zone 'Asia/Kolkata')::date as day, s.captured_at, s.holdings
+  from portfolio_snapshots s
+  where s.user_id = p_user and s.captured_at >= now() - make_interval(days => p_days)
+  order by (s.captured_at at time zone 'Asia/Kolkata')::date, s.captured_at desc
+$$;
+revoke execute on function holdings_daily(uuid, int) from public, anon, authenticated;
