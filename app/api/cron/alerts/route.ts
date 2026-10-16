@@ -5,6 +5,7 @@ import { tierFor, alertMessage } from "@/lib/alerts";
 import { getDividendsForSymbols } from "@/lib/nse-dividends";
 import { renderStatCard, renderSummaryCard, inrImg, signImg } from "@/lib/alert-card";
 import { runDividendAutoLog } from "@/lib/dividend-auto-log";
+import { saveUpcomingDividends } from "@/lib/dividend-cache";
 
 // ONE cron job covers every alert type. Run this every 15 min (same cadence
 // as the stock refresh) — it only READS data the other crons have already
@@ -221,6 +222,9 @@ export async function GET(req: NextRequest) {
         if (holdings.length > 0) {
           const symbols = Array.from(new Set(holdings.map((h) => h.symbol)));
           const dividends = await getDividendsForSymbols(symbols);
+          // Keep the saved copy of upcoming dividends fresh even on days the
+          // dashboard isn't opened.
+          if (dividends.length > 0) await saveUpcomingDividends(user.id, dividends);
 
           for (const d of dividends) {
             const tier = `div|${d.date}|${d.label}`.slice(0, 120);

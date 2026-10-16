@@ -36,6 +36,8 @@ export default function DividendsPage() {
   const [recordDate, setRecordDate] = useState("");
   const [note, setNote] = useState("");
 
+  const [dividendSource, setDividendSource] = useState<{ live: number; fromSaved: number; savedAt: string | null } | null>(null);
+
   function loadData() {
     setLoading(true);
     Promise.all([
@@ -44,6 +46,7 @@ export default function DividendsPage() {
       fetch("/api/dividends/page-data").then((r) => r.json()),
     ]).then(([divData, portfolioData, pageData]) => {
       setEvents((divData.events || []).filter((e: any) => e.type === "dividend"));
+      setDividendSource(divData.dividendSource || null);
       setPortfolioHoldings(portfolioData.holdings || []);
       setReceived(pageData.received || []);
       setReceivedThisFY(pageData.receivedThisFY || 0);
@@ -183,6 +186,13 @@ export default function DividendsPage() {
             </button>
           </div>
         </div>
+
+        {dividendSource && dividendSource.fromSaved > 0 && (
+          <div style={{ fontSize: 12, color: "var(--text-muted)", background: "var(--gold-soft)", border: "1px solid rgba(229,169,58,0.25)", borderRadius: 8, padding: "8px 10px", marginBottom: 12 }}>
+            NSE didn&apos;t respond for {dividendSource.fromSaved === 1 ? "1 stock" : `${dividendSource.fromSaved} stocks`} just now, so {dividendSource.fromSaved === 1 ? "it is" : "they are"} shown from saved data
+            {dividendSource.savedAt ? ` (last confirmed ${new Date(dividendSource.savedAt).toLocaleString("en-IN", { day: "numeric", month: "short", hour: "numeric", minute: "2-digit" })})` : ""}.
+          </div>
+        )}
 
         <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12, color: "var(--text-muted)", marginBottom: 12, cursor: "pointer" }}>
           <input type="checkbox" checked={hidePending} onChange={(e) => setHidePending(e.target.checked)} />

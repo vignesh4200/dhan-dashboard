@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { getCurrentUser } from "@/lib/session";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
-import { getCalendarEvents } from "@/lib/calendar";
+import { getCalendarEventsWithSavedDividends } from "@/lib/dividend-cache";
 
 export async function GET() {
   const user = await getCurrentUser();
@@ -18,6 +18,8 @@ export async function GET() {
   if (!snap) return NextResponse.json({ events: [] });
 
   const symbols = (snap.holdings || []).map((h: any) => h.symbol);
-  const events = await getCalendarEvents(symbols);
-  return NextResponse.json({ events });
+  // Live NSE/Yahoo data, with dividends NSE failed to return (it blocks
+  // cloud IPs now and then) filled in from the last saved copy.
+  const { events, dividendSource } = await getCalendarEventsWithSavedDividends(user.id, symbols);
+  return NextResponse.json({ events, dividendSource });
 }

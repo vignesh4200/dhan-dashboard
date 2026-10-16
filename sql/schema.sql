@@ -38,3 +38,17 @@ create table if not exists alert_log (
 );
 -- one alert per stock/tier/day so a 15-min job doesn't spam you
 create unique index if not exists idx_alert_dedupe on alert_log(user_id, symbol, tier, alert_date);
+
+
+-- Saved copy of upcoming dividends (lib/dividend-cache.ts). NSE blocks cloud
+-- IPs intermittently; pages fall back to these rows when it does.
+create table if not exists upcoming_dividends_cache (
+  user_id uuid not null references users(id) on delete cascade,
+  symbol text not null,
+  label text not null,
+  event_date date not null,
+  display_date text not null,
+  updated_at timestamptz not null default now(),
+  primary key (user_id, symbol, event_date)
+);
+alter table upcoming_dividends_cache enable row level security;

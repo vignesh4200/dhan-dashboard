@@ -415,6 +415,7 @@ export default function DashboardOverview() {
   const [dividendReceivedThisFY, setDividendReceivedThisFY] = useState(0);
   const [trends, setTrends] = useState<{ stocks: number[]; mf: number[]; gold: number[] }>({ stocks: [], mf: [], gold: [] });
   const [tracks, setTracks] = useState<any[]>([]);
+  const [dividendSource, setDividendSource] = useState<{ fromSaved: number; savedAt: string | null } | null>(null);
 
   useEffect(() => {
     fetch("/api/portfolio").then((r) => {
@@ -426,7 +427,7 @@ export default function DashboardOverview() {
       if (!snap.empty) {
         fetch("/api/movers").then((r) => r.json()).then((d) => setMovers(d.movers || []));
         fetch("/api/news").then((r) => r.json()).then((d) => setNews(d.news || []));
-        fetch("/api/dividends").then((r) => r.json()).then((d) => setEvents(d.events || []));
+        fetch("/api/dividends").then((r) => r.json()).then((d) => { setEvents(d.events || []); setDividendSource(d.dividendSource || null); });
       }
       fetch("/api/mutual-funds").then((r) => r.json()).then((d) => setMfHoldings(d.holdings || []));
       fetch("/api/gold").then((r) => r.json()).then((d) => setGoldHoldings(d.holdings || []));
@@ -843,6 +844,12 @@ export default function DashboardOverview() {
 
       <div className="list-card" style={{ marginTop: 18, marginBottom: 40 }}>
         <div className="list-head"><div className="list-title">Dividends &amp; Earnings</div></div>
+        {dividendSource && dividendSource.fromSaved > 0 && (
+          <div style={{ fontSize: 11.5, color: "var(--text-muted)", marginBottom: 8 }}>
+            NSE didn&apos;t respond just now. {dividendSource.fromSaved} dividend{dividendSource.fromSaved === 1 ? "" : "s"} shown from saved data
+            {dividendSource.savedAt ? ` (last confirmed ${new Date(dividendSource.savedAt).toLocaleString("en-IN", { day: "numeric", month: "short", hour: "numeric", minute: "2-digit" })})` : ""}.
+          </div>
+        )}
         {events.length === 0 ? <div style={{ color: "var(--text-muted)", fontSize: 12.5 }}>No upcoming events found.</div> :
           events.map((e, i) => {
             let dividendAmount: number | null = null;
