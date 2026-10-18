@@ -66,3 +66,14 @@ as $$
   order by (s.captured_at at time zone 'Asia/Kolkata')::date, s.captured_at desc
 $$;
 revoke execute on function holdings_daily(uuid, int) from public, anon, authenticated;
+
+-- Cached fund portfolios (lib/mf-portfolio.ts), refreshed weekly from Groww.
+create table if not exists mf_portfolio_cache (
+  scheme_code text primary key,
+  search_id text,
+  portfolio_date date,
+  holdings jsonb not null default '[]'::jsonb,
+  meta jsonb,
+  fetched_at timestamptz not null default now()
+);
+alter table mf_portfolio_cache enable row level security;
