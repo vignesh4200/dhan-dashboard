@@ -7,7 +7,7 @@ async function probe(url: string) {
   try {
     const r = await fetch(url, { headers: UA, cache: "no-store" });
     const t = await r.text();
-    return { url, status: r.status, len: t.length, head: t.slice(0, 1500) };
+    let full: any = null; try { full = JSON.parse(t); } catch {} return { url, status: r.status, len: t.length, head: t.slice(0, 1500), full };
   } catch (e: any) { return { url, error: e.message }; }
 }
 export async function GET(req: NextRequest) {
