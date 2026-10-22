@@ -92,6 +92,50 @@ export async function runDividendAutoLog() {
         }
       }
 
+      // Fallback: NSE often refuses Vercel's servers, and getHistoricalDividendsForSymbol
+      // then returns an empty list silently, so nothing gets logged. The dashboard
+      // already keeps the last good NSE response in upcoming_dividends_cache — use any
+      // cached dividend whose date has now passed. The existing-row check keeps this
+      // from double-logging anything NSE did return above.
+      const qtyBySymbol: Record<string, number> = {};
+      for (const h of holdings) qtyBySymbol[h.symbol] = Number(h.qty);
+      const isoDay = (d: Date) => d.toISOString().slice(0, 10);
+      const { data: cached } = await supabaseAdmin
+        .from("upcoming_dividends_cache")
+        .select("symbol, label, event_date")
+        .eq("user_id", user.id)
+        .gte("event_date", isoDay(cutoff))
+        .lte("event_date", isoDay(new Date()));
+
+      for (const c of cached || []) {
+        const qty = qtyBySymbol[c.symbol];
+        if (!qty || !/dividend/i.test(c.label || "")) continue;
+        const m = (c.label || "").match(/R[se]\.?\s*([\d.]+)/i);
+        const perShare = m ? parseFloat(m[1]) : NaN;
+        if (!perShare) continue;
+
+        const { data: existing } = await supabaseAdmin
+          .from("dividend_received")
+          .select("id")
+          .eq("user_id", user.id)
+          .eq("symbol", c.symbol)
+          .eq("record_date", c.event_date)
+          .maybeSingle();
+        if (existing) { skipped++; continue; }
+
+        const { error } = await supabaseAdmin.from("dividend_received").insert({
+          user_id: user.id,
+          symbol: c.symbol,
+          amount: perShare * qty,
+          per_share_amount: perShare,
+          quantity_at_record_date: qty,
+          record_date: c.event_date,
+          source: "auto_current_holdings",
+          note: c.label,
+        });
+        if (!error) logged++;
+      }
+
       results.push({ user: user.id, ok: true, holdingsChecked: holdings.length, logged, skipped });
     } catch (e: any) {
       results.push({ user: user.id, ok: false, error: e.message });
