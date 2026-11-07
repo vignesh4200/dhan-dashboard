@@ -153,7 +153,7 @@ function Heatmap({ a }: { a: Analytics }) {
               const alpha = (0.18 + 0.7 * Math.sqrt(Math.min(1, Math.abs(b.net) / maxAbs))).toFixed(2);
               return (
                 <div key={key} className={s.heatCell} title={`${MON[m - 1]} ${key.slice(0, 4)}: ${sinr(b.net)} · ${b.trades} trades`}
-                  style={{ background: b.net >= 0 ? `rgba(94,227,168,${alpha})` : `rgba(255,143,154,${alpha})` }}>
+                  style={{ background: b.net >= 0 ? `rgba(74,222,128,${alpha})` : `rgba(248,113,113,${alpha})` }}>
                   {kfmt(b.net)}
                 </div>
               );
@@ -785,7 +785,7 @@ export default function PnlPage() {
               <Card title="Cumulative realized P&L" right={
                 <div className={s.legend}>
                   <span><i style={{ width: 14, height: 3, background: "var(--gain)", display: "block" }} />Net P&amp;L</span>
-                  <span><i style={{ width: 12, height: 10, background: "rgba(255,143,154,.4)", display: "block" }} />Drawdown from peak</span>
+                  <span><i style={{ width: 12, height: 10, background: "rgba(248,113,113,.4)", display: "block" }} />Drawdown from peak</span>
                 </div>
               }>
                 <Curve a={a} />

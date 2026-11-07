@@ -188,7 +188,7 @@ export default function DividendsPage() {
         </div>
 
         {dividendSource && dividendSource.fromSaved > 0 && (
-          <div style={{ fontSize: 12, color: "var(--text-muted)", background: "var(--gold-soft)", border: "1px solid rgba(157,184,255,0.25)", borderRadius: 8, padding: "8px 10px", marginBottom: 12 }}>
+          <div style={{ fontSize: 12, color: "var(--text-muted)", background: "var(--gold-soft)", border: "1px solid rgba(217,178,106,0.25)", borderRadius: 8, padding: "8px 10px", marginBottom: 12 }}>
             NSE didn&apos;t respond for {dividendSource.fromSaved === 1 ? "1 stock" : `${dividendSource.fromSaved} stocks`} just now, so {dividendSource.fromSaved === 1 ? "it is" : "they are"} shown from saved data
             {dividendSource.savedAt ? ` (last confirmed ${new Date(dividendSource.savedAt).toLocaleString("en-IN", { day: "numeric", month: "short", hour: "numeric", minute: "2-digit" })})` : ""}.
           </div>

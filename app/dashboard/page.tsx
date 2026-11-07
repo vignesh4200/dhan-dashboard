@@ -7,6 +7,36 @@ const inr = (n: number | null | undefined, d = 0) =>
   "₹" + (n ?? 0).toLocaleString("en-IN", { minimumFractionDigits: d, maximumFractionDigits: d });
 const sign = (n: number | null | undefined) => ((n ?? 0) >= 0 ? "+" : "−");
 
+// Allocation ring for the hero card (Private Banking theme): one arc per
+// asset class, sized by current value, with the overall return in the middle.
+function AllocationRing({ parts, gainPct }: { parts: { label: string; value: number; color: string }[]; gainPct: number }) {
+  const total = parts.reduce((s, p) => s + Math.max(0, p.value), 0);
+  const R = 58, C = 2 * Math.PI * R;
+  let off = 0;
+  const shown = parts.filter((p) => p.value > 0);
+  const label = shown.map((p) => `${p.label} ${total ? ((p.value / total) * 100).toFixed(1) : 0}%`).join(", ");
+  return (
+    <svg width="150" height="150" viewBox="0 0 150 150" role="img" aria-label={`Allocation: ${label}. Overall return ${gainPct.toFixed(1)}%`} style={{ flex: "none" }}>
+      <circle cx="75" cy="75" r={R} fill="none" stroke="var(--border)" strokeWidth="14" />
+      {total > 0 && shown.map((p) => {
+        const len = (C * p.value) / total;
+        const gap = shown.length > 1 ? 4 : 0;
+        const el = (
+          <circle key={p.label} cx="75" cy="75" r={R} fill="none" stroke={p.color} strokeWidth="14"
+            strokeDasharray={`${Math.max(0, len - gap).toFixed(1)} ${C.toFixed(1)}`} strokeDashoffset={(-off).toFixed(1)}
+            transform="rotate(-90 75 75)" />
+        );
+        off += len;
+        return el;
+      })}
+      <text x="75" y="70" textAnchor="middle" fontSize="10" letterSpacing="1.5" fill="var(--text-muted)">RETURN</text>
+      <text x="75" y="92" textAnchor="middle" fontSize="18" fontWeight="700" fill={gainPct >= 0 ? "var(--gain)" : "var(--loss)"}>
+        {gainPct >= 0 ? "+" : "−"}{Math.abs(gainPct).toFixed(1)}%
+      </text>
+    </svg>
+  );
+}
+
 const ASSET_TABS = [
   { key: "all", label: "All" },
   { key: "stocks", label: "Stocks" },
@@ -131,111 +161,68 @@ function PerfChart() {
     setHoverIdx(null);
   }
 
+  // Controls styled as pill segments (Private Banking mockup): asset tabs
+  // on the left, preset ranges on the right, custom dates underneath.
   const tabs = (
-    <div style={{ display: "flex", gap: 6, marginBottom: 18, flexWrap: "wrap" }}>
+    <div className="seg-pill" role="group" aria-label="Asset type">
       {ASSET_TABS.map((t) => (
-        <button
-          key={t.key}
-          onClick={() => setAssetType(t.key)}
-          style={{
-            background: assetType === t.key ? "var(--purple)" : "transparent",
-            color: assetType === t.key ? "var(--gold-ink)" : "var(--text-muted)",
-            border: assetType === t.key ? "none" : "1px solid var(--border)",
-            borderRadius: 8, padding: "6px 14px", fontSize: 12,
-            fontWeight: assetType === t.key ? 600 : 400, cursor: "pointer",
-          }}
-        >
+        <button key={t.key} type="button" aria-pressed={assetType === t.key} onClick={() => setAssetType(t.key)}>
           {t.label}
         </button>
       ))}
     </div>
   );
 
-  const rangeControls = (
-    <div style={{ display: "flex", gap: 6, marginBottom: 16, flexWrap: "wrap", alignItems: "center" }}>
+  const presets = (
+    <div className="seg-pill" role="group" aria-label="Range">
       {RANGE_OPTIONS.map((r) => (
-        <button
-          key={r.label}
-          onClick={() => selectPreset(r.label)}
-          style={{
-            background: !usingCustomRange && range === r.label ? "var(--purple)" : "transparent",
-            color: !usingCustomRange && range === r.label ? "var(--gold-ink)" : "var(--text-muted)",
-            border: !usingCustomRange && range === r.label ? "none" : "1px solid var(--border)",
-            borderRadius: 8, padding: "5px 12px", fontSize: 11.5,
-            fontWeight: !usingCustomRange && range === r.label ? 600 : 400, cursor: "pointer",
-          }}
-        >
+        <button key={r.label} type="button" aria-pressed={!usingCustomRange && range === r.label} onClick={() => selectPreset(r.label)}>
           {r.label}
         </button>
       ))}
-
-      <div style={{ width: 1, height: 20, background: "var(--border)", margin: "0 4px" }} />
-
-      <input
-        type="date"
-        value={customFrom}
-        onChange={(e) => setCustomFrom(e.target.value)}
-        style={{
-          fontSize: 11.5, padding: "5px 8px", borderRadius: 8,
-          border: "1px solid var(--border)", background: "transparent", color: "var(--text-muted)",
-        }}
-      />
-      <span style={{ fontSize: 11.5, color: "var(--text-muted)" }}>to</span>
-      <input
-        type="date"
-        value={customTo}
-        onChange={(e) => setCustomTo(e.target.value)}
-        style={{
-          fontSize: 11.5, padding: "5px 8px", borderRadius: 8,
-          border: "1px solid var(--border)", background: "transparent", color: "var(--text-muted)",
-        }}
-      />
-      <button
-        onClick={applyCustomRange}
-        disabled={!customFrom || !customTo}
-        style={{
-          background: usingCustomRange ? "var(--purple)" : "transparent",
-          color: usingCustomRange ? "var(--gold-ink)" : "var(--text-muted)",
-          border: usingCustomRange ? "none" : "1px solid var(--border)",
-          borderRadius: 8, padding: "5px 12px", fontSize: 11.5,
-          fontWeight: usingCustomRange ? 600 : 400,
-          cursor: !customFrom || !customTo ? "default" : "pointer",
-          opacity: !customFrom || !customTo ? 0.5 : 1,
-        }}
-      >
-        Apply range
-      </button>
-      {usingCustomRange && (
-        <button
-          onClick={clearCustomRange}
-          style={{
-            background: "transparent", color: "var(--text-muted)", border: "none",
-            fontSize: 11.5, textDecoration: "underline", cursor: "pointer", padding: "5px 4px",
-          }}
-        >
-          Clear
-        </button>
-      )}
     </div>
   );
 
+  const rangeControls = (
+    <>
+      <div style={{ display: "flex", justifyContent: "space-between", gap: 12, flexWrap: "wrap", marginBottom: 12 }}>
+        {tabs}
+        {presets}
+      </div>
+      <div style={{ display: "flex", gap: 8, marginBottom: 16, flexWrap: "wrap", alignItems: "center", fontSize: 12, color: "var(--text-muted)" }}>
+        <label htmlFor="perf-from">Custom range</label>
+        <input id="perf-from" type="date" className="date-pill" value={customFrom} onChange={(e) => setCustomFrom(e.target.value)} />
+        <label htmlFor="perf-to">to</label>
+        <input id="perf-to" type="date" className="date-pill" value={customTo} onChange={(e) => setCustomTo(e.target.value)} />
+        <div className="seg-pill">
+          <button type="button" aria-pressed={usingCustomRange} onClick={applyCustomRange} disabled={!customFrom || !customTo}>Apply range</button>
+        </div>
+        {usingCustomRange && (
+          <button type="button" onClick={clearCustomRange}
+            style={{ background: "transparent", color: "var(--gold)", border: "none", fontSize: 12, fontWeight: 600, cursor: "pointer", padding: "5px 4px" }}>
+            Clear
+          </button>
+        )}
+      </div>
+    </>
+  );
+
   if (loading) {
-    return <div>{tabs}<div style={{ color: "var(--text-muted)", fontSize: 13, padding: "30px 0", textAlign: "center" }}>Loading…</div></div>;
+    return <div>{rangeControls}<div className="chart-well" style={{ color: "var(--text-muted)", fontSize: 13, padding: "30px 0", textAlign: "center" }}>Loading…</div></div>;
   }
 
   if (filteredPoints.length < 2) {
     return (
       <div>
-        {tabs}
         {rangeControls}
-        <div style={{ color: "var(--text-muted)", fontSize: 13, padding: "30px 0", textAlign: "center" }}>
+        <div className="chart-well" style={{ color: "var(--text-muted)", fontSize: 13, padding: "30px 0", textAlign: "center" }}>
           Not enough history yet for this view — it builds up over time as snapshots accumulate.
         </div>
       </div>
     );
   }
 
-  const w = 900, h = 210, padTop = 16, padBottom = 36, padLeft = 8, padRight = 8;
+  const w = 900, h = 222, padTop = 28, padBottom = 36, padLeft = 8, padRight = 8;
   const allValues = filteredPoints.flatMap((p) => [p.current, p.invested]);
   const min = Math.min(...allValues), max = Math.max(...allValues);
   const rangeSpan = max - min || 1;
@@ -294,7 +281,7 @@ function PerfChart() {
 
   return (
     <div>
-      {tabs}
+      {rangeControls}
 
       <div style={{ display: "flex", gap: 40, marginBottom: 16, flexWrap: "wrap" }}>
         <div>
@@ -317,18 +304,17 @@ function PerfChart() {
         </div>
       </div>
 
-      {rangeControls}
-
+      <div className="chart-well">
       <svg
         viewBox={`0 0 ${w} ${h}`}
-        style={{ width: "100%", height: 210, cursor: "crosshair" }}
+        style={{ width: "100%", height: 222, cursor: "crosshair" }}
         onMouseMove={handleMouseMove}
         onMouseLeave={() => setHoverIdx(null)}
       >
         <defs>
           <linearGradient id="lineGrad" x1="0" y1="0" x2="1" y2="0">
-            <stop offset="0%" stopColor="#859fff" />
-            <stop offset="100%" stopColor="#dbe5ff" />
+            <stop offset="0%" stopColor="#c99a48" />
+            <stop offset="100%" stopColor="#f3e6c8" />
           </linearGradient>
           <filter id="chartGlow" x="-50%" y="-50%" width="200%" height="200%">
             <feGaussianBlur stdDeviation="4" result="blur" />
@@ -352,8 +338,8 @@ function PerfChart() {
         <path d={investedPath} fill="none" stroke="var(--text-muted)" strokeWidth="1.75" strokeLinecap="round" strokeDasharray="5,4" />
         <path d={currentPath} fill="none" stroke="url(#lineGrad)" strokeWidth="3" strokeLinecap="round" filter="url(#chartGlow)" />
 
-        <circle cx={currentCoords[currentCoords.length - 1].x} cy={currentCoords[currentCoords.length - 1].y} r="8" fill="#9db8ff" opacity="0.25" />
-        <circle cx={currentCoords[currentCoords.length - 1].x} cy={currentCoords[currentCoords.length - 1].y} r="4.5" fill="#fff" stroke="#9db8ff" strokeWidth="2.5" />
+        <circle cx={currentCoords[currentCoords.length - 1].x} cy={currentCoords[currentCoords.length - 1].y} r="8" fill="#d9b26a" opacity="0.25" />
+        <circle cx={currentCoords[currentCoords.length - 1].x} cy={currentCoords[currentCoords.length - 1].y} r="4.5" fill="#fff" stroke="#d9b26a" strokeWidth="2.5" />
 
         <text
           x={currentCoords[currentCoords.length - 1].x - 10}
@@ -381,7 +367,7 @@ function PerfChart() {
           return (
             <g>
               <line x1={currentCoords[hoverIdx].x} y1={padTop} x2={currentCoords[hoverIdx].x} y2={padTop + plotH} stroke="var(--text-muted)" strokeWidth="1" strokeDasharray="3,3" />
-              <circle cx={currentCoords[hoverIdx].x} cy={currentCoords[hoverIdx].y} r="5" fill="#fff" stroke="#9db8ff" strokeWidth="2.5" />
+              <circle cx={currentCoords[hoverIdx].x} cy={currentCoords[hoverIdx].y} r="5" fill="#fff" stroke="#d9b26a" strokeWidth="2.5" />
               <circle cx={investedCoords[hoverIdx].x} cy={investedCoords[hoverIdx].y} r="4" fill="var(--text-muted)" />
               <rect x={boxX} y={padTop + 4} width="200" height="52" rx="8" fill="var(--bg)" stroke="var(--border)" strokeWidth="1" />
               <text x={boxX + 12} y={padTop + 22} fontSize="10" fill="var(--text-muted)">{formatLabel(hp.captured_at)}</text>
@@ -395,6 +381,13 @@ function PerfChart() {
           );
         })()}
       </svg>
+      </div>
+
+      <div className="chart-legend">
+        <span><i style={{ display: "block", width: 16, height: 3, background: "var(--gold)" }} />Current value</span>
+        <span><i style={{ display: "block", width: 16, borderTop: "2px dashed var(--text-muted)" }} />Invested</span>
+        <span><i style={{ display: "block", width: 14, height: 10, background: "var(--gain-soft)" }} />Gain band</span>
+      </div>
 
       <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 10, lineHeight: 1.5 }}>
         Hover the chart to see Current, Invested, and Gain for any specific date. "{ASSET_TABS.find((t) => t.key === assetType)?.label}" view{assetType !== "stocks" ? " builds up from when combined tracking started" : " uses your full stock history"}.
@@ -572,55 +565,93 @@ export default function DashboardOverview() {
 
   return (
     <div>
-      <div style={{ fontFamily: "var(--font-display)", fontSize: 22, fontWeight: 600 }}>Good day, Vignesh</div>
-      <div style={{ color: "var(--text-muted)", fontSize: 13, marginTop: 4 }}>
-        Last synced {new Date(data.captured_at).toLocaleString("en-IN", { dateStyle: "medium", timeStyle: "short" })}
-      </div>
+      <header className="dash-header">
+        <div>
+          <div className="eyebrow">Dashboard</div>
+          <h1 className="dash-title">Good day, Vignesh</h1>
+          <div style={{ color: "var(--text-muted)", fontSize: 13, marginTop: 4 }}>
+            Last synced {new Date(data.captured_at).toLocaleString("en-IN", { dateStyle: "medium", timeStyle: "short" })}
+          </div>
+        </div>
+        <div className="dash-actions">
+          {/* Jumps to Holdings with the search pre-filled. */}
+          <form role="search" className="search-pill"
+            onSubmit={(e) => {
+              e.preventDefault();
+              const q = String(new FormData(e.currentTarget).get("q") || "").trim();
+              router.push(q ? `/dashboard/holdings?q=${encodeURIComponent(q)}` : "/dashboard/holdings");
+            }}>
+            <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7" /><path d="m20 20-3.5-3.5" /></svg>
+            <input name="q" type="search" placeholder="Search holdings…" aria-label="Search holdings" />
+          </form>
+          {/* Dhan data syncs every 15 minutes by schedule; this reloads the latest. */}
+          <button type="button" className="pill-btn" onClick={() => window.location.reload()}>Refresh</button>
+        </div>
+      </header>
 
       <div className="kpi-grid">
         <div className="vault-card vault-hero">
-          <span className="vault-rivet" style={{ top: 12, left: 12 }} />
-          <span className="vault-rivet" style={{ top: 12, right: 12 }} />
-          <span className="vault-rivet" style={{ bottom: 12, left: 12 }} />
-          <span className="vault-rivet" style={{ bottom: 12, right: 12 }} />
-          <div className="vault-label">Total portfolio value</div>
-          <div className="vault-big">{inr(combinedTotal)}</div>
-          <div className="vault-hero-row">
-            <div>
-              <div className="vault-label">Overall P&amp;L</div>
-              <div className="val" style={{ color: combinedGain >= 0 ? "var(--gain)" : "var(--loss)" }}>
-                {sign(combinedGain)}{inr(Math.abs(combinedGain))} ({sign(combinedGainPct)}{Math.abs(combinedGainPct).toFixed(2)}%)
+          <div className="hero-flex">
+            <AllocationRing
+              gainPct={combinedGainPct}
+              parts={[
+                { label: "Stocks", value: data.total_current, color: "var(--c-stocks)" },
+                { label: "Mutual Funds", value: mfTotalCurrent, color: "var(--c-mf)" },
+                { label: "Gold", value: goldTotalCurrent, color: "var(--c-gold)" },
+              ]}
+            />
+            <div className="hero-body">
+              <div className="eyebrow">Total portfolio value</div>
+              <div className="vault-big">{inr(combinedTotal)}</div>
+              <div className="vault-hero-row">
+                <div>
+                  <div className="vault-label">Overall P&amp;L</div>
+                  <div className="val" style={{ color: combinedGain >= 0 ? "var(--gain)" : "var(--loss)" }}>
+                    {sign(combinedGain)}{inr(Math.abs(combinedGain))} ({sign(combinedGainPct)}{Math.abs(combinedGainPct).toFixed(2)}%)
+                  </div>
+                </div>
+                <div>
+                  <div className="vault-label">Invested</div>
+                  <div className="val">{inr(combinedInvested)}</div>
+                </div>
               </div>
-            </div>
-            <div>
-              <div className="vault-label">Invested</div>
-              <div className="val">{inr(combinedInvested)}</div>
+              <div className="alloc-legend">
+                {[
+                  { label: "Stocks", value: data.total_current, color: "var(--c-stocks)" },
+                  { label: "Mutual Funds", value: mfTotalCurrent, color: "var(--c-mf)" },
+                  { label: "Gold", value: goldTotalCurrent, color: "var(--c-gold)" },
+                ].filter((x) => x.value > 0).map((x) => (
+                  <span key={x.label}><i style={{ background: x.color }} />{x.label} {combinedTotal > 0 ? ((x.value / combinedTotal) * 100).toFixed(1) : 0}%</span>
+                ))}
+              </div>
             </div>
           </div>
         </div>
 
         <Link href="/dashboard/dividends" className="vault-card" style={{ textDecoration: "none", color: "inherit" }}>
-          <div className="vault-label">Dividends this FY</div>
+          <div className="eyebrow">Dividends this FY</div>
           <div className="vault-mid">{inr(dividendReceivedThisFY)}</div>
           <div className="vault-sub">
             {expectedThisMonth > 0
-              ? <><span style={{ color: "var(--gain)" }}>+{inr(expectedThisMonth)}</span> <span className="muted">expected in {thisMonthName}</span></>
-              : <span className="muted">{fyPayouts} payout{fyPayouts === 1 ? "" : "s"} received</span>}
+              ? <><span style={{ color: "var(--gain)", fontWeight: 600 }}>+{inr(expectedThisMonth)}</span> expected in {thisMonthName}</>
+              : <>{fyPayouts} payout{fyPayouts === 1 ? "" : "s"} received</>}
           </div>
+          <span className="open-pill">Open →</span>
         </Link>
 
         <Link href="/dashboard/signals" className="vault-card" style={{ textDecoration: "none", color: "inherit" }}>
-          <div className="vault-label">Open signals</div>
+          <div className="eyebrow">Open signals</div>
           <div className="vault-mid">{boughtTracks.length}</div>
           <div className="vault-sub">
             {boughtTracks.length === 0
-              ? <span className="muted">None marked as bought</span>
-              : <span style={{ color: trackedPnl >= 0 ? "var(--gain)" : "var(--loss)" }}>{sign(trackedPnl)}{inr(Math.abs(trackedPnl))} <span className="muted">live P&amp;L</span></span>}
+              ? <>None marked as bought</>
+              : <><span style={{ color: trackedPnl >= 0 ? "var(--gain)" : "var(--loss)", fontWeight: 600 }}>{sign(trackedPnl)}{inr(Math.abs(trackedPnl))}</span> live P&amp;L</>}
           </div>
+          <span className="open-pill">Open →</span>
         </Link>
       </div>
 
-      <div className="section-label">Stocks (Dhan)</div>
+      <div className="section-label">Stocks · Dhan</div>
       <div className="stat-grid" style={{ marginTop: 14 }}>
         <div className="stat-card"><div className="stat-label">Total return</div><div className="stat-value" style={{ color: data.total_pnl >= 0 ? "var(--gain)" : "var(--loss)" }}>{sign(data.total_pnl)}{inr(Math.abs(data.total_pnl))}</div><div className="stat-sub" style={{ color: totalPnlPct >= 0 ? "var(--gain)" : "var(--loss)" }}>{sign(totalPnlPct)}{Math.abs(totalPnlPct).toFixed(1)}%</div></div>
         <div className="stat-card"><div className="stat-label">Invested</div><div className="stat-value">{inr(data.total_invested)}</div><div className="stat-sub">{data.holdings.length} positions</div></div>
@@ -628,7 +659,7 @@ export default function DashboardOverview() {
         <div className="stat-card"><div className="stat-label">In profit</div><div className="stat-value">{inProfitPct.toFixed(0)}%</div><div className="stat-sub">of holdings</div></div>
       </div>
 
-      <div className="list-card" style={{ marginTop: 18 }}>
+      <div className="list-card" style={{ marginTop: 24 }}>
         <div className="list-head"><div className="list-title">Asset Overview</div></div>
         <div className="asset-tiles">
           <Link href="/dashboard/holdings" className="asset-tile">
@@ -658,72 +689,76 @@ export default function DashboardOverview() {
         </div>
       </div>
 
-      <div className="list-card" style={{ marginTop: 18 }}>
+      <div className="list-card" style={{ marginTop: 24 }}>
         <div className="list-head"><div className="list-title">Portfolio Performance</div></div>
         <PerfChart />
       </div>
 
-      <div className="list-card" style={{ marginTop: 18 }}>
-        <div className="list-head"><div className="list-title">Top Holdings</div><Link href="/dashboard/holdings" className="list-link">View All →</Link></div>
-        {data.holdings.slice(0, 5).map((h: any) => (
-          <div key={h.symbol} style={{ display: "flex", justifyContent: "space-between", padding: "10px 0", borderBottom: "1px solid var(--border)", fontSize: 13 }}>
-            <span style={{ fontWeight: 600 }}>{h.symbol}</span>
-            <span style={{ color: h.pnlPct >= 0 ? "var(--gain)" : "var(--loss)" }}>{sign(h.pnlPct)}{Math.abs(h.pnlPct).toFixed(1)}%</span>
+      {/* Lists in pairs, as in the mockup: holdings | funds, gold | dividends. */}
+      <div className="two-col" style={{ marginTop: 24 }}>
+        <div className="list-card">
+          <div className="list-head"><div className="list-title">Top Holdings</div><Link href="/dashboard/holdings" className="list-link">View all →</Link></div>
+          {data.holdings.slice(0, 5).map((h: any) => (
+            <div key={h.symbol} className="row-line">
+              <span><b style={{ fontWeight: 600 }}>{h.symbol}</b>{h.sector && <span className="sub">{h.sector}</span>}</span>
+              <span style={{ color: h.pnlPct >= 0 ? "var(--gain)" : "var(--loss)", fontWeight: 600 }}>{sign(h.pnlPct)}{Math.abs(h.pnlPct).toFixed(1)}%</span>
+            </div>
+          ))}
+        </div>
+
+        {mfHoldings.length > 0 && (
+          <div className="list-card">
+            <div className="list-head">
+              <div className="list-title">Mutual Fund Holdings <span className="src-badge" style={{ color: "var(--c-mf)" }}>via Groww</span></div>
+              <Link href="/dashboard/mutual-funds" className="list-link">View all →</Link>
+            </div>
+            {mfHoldings.slice(0, 5).map((h: any, i: number) => {
+              const pnlPct = h.invested > 0 ? (((h.currentValue ?? 0) - h.invested) / h.invested) * 100 : 0;
+              return (
+                <div key={i} className="row-line">
+                  <span><b style={{ fontWeight: 600 }}>{h.schemeName}</b><span className="sub">{h.category}</span></span>
+                  <span style={{ color: pnlPct >= 0 ? "var(--gain)" : "var(--loss)", fontWeight: 600 }}>{sign(pnlPct)}{Math.abs(pnlPct).toFixed(1)}%</span>
+                </div>
+              );
+            })}
           </div>
-        ))}
+        )}
+
+        {goldHoldings.length > 0 && (
+          <div className="list-card">
+            <div className="list-head">
+              <div className="list-title">Gold Holdings <span className="src-badge" style={{ color: "var(--c-gold)" }}>via IBJA</span></div>
+              <Link href="/dashboard/gold" className="list-link">View all →</Link>
+            </div>
+            {goldHoldings.slice(0, 5).map((h: any) => (
+              <div key={h.id} className="row-line">
+                <span><b style={{ fontWeight: 600 }}>{h.weightGrams}g {h.purity.toUpperCase()}</b>{h.note && <span className="sub">{h.note}</span>}</span>
+                <span style={{ color: h.pnlPct >= 0 ? "var(--gain)" : "var(--loss)", fontWeight: 600 }}>{sign(h.pnlPct)}{Math.abs(h.pnlPct).toFixed(1)}%</span>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {dividendReceived.length > 0 && (
+          <div className="list-card">
+            <div className="list-head">
+              <div className="list-title">Recent Dividends <span className="src-badge" style={{ color: "var(--gain)" }}>via Dhan</span></div>
+              <Link href="/dashboard/dividends" className="list-link">View all →</Link>
+            </div>
+            {dividendReceived.slice(0, 5).map((r: any) => (
+              <div key={r.id} className="row-line">
+                <span><b style={{ fontWeight: 600 }}>{r.symbol}</b><span className="sub">{r.record_date}</span></span>
+                <span style={{ color: "var(--gain)", fontWeight: 600 }}>{inr(r.amount)}</span>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
 
-      {mfHoldings.length > 0 && (
-        <div className="list-card" style={{ marginTop: 18 }}>
-          <div className="list-head">
-            <div className="list-title">Mutual Fund Holdings <span style={{ fontSize: 10, background: "var(--gold-soft)", color: "var(--gold)", padding: "2px 7px", borderRadius: 100, marginLeft: 8 }}>via Groww</span></div>
-            <Link href="/dashboard/mutual-funds" className="list-link">View All →</Link>
-          </div>
-          {mfHoldings.slice(0, 5).map((h: any, i: number) => {
-            const pnlPct = h.invested > 0 ? (((h.currentValue ?? 0) - h.invested) / h.invested) * 100 : 0;
-            return (
-              <div key={i} style={{ display: "flex", justifyContent: "space-between", padding: "10px 0", borderBottom: "1px solid var(--border)", fontSize: 13 }}>
-                <span style={{ fontWeight: 600 }}>{h.schemeName}<span style={{ fontWeight: 400, color: "var(--text-muted)", fontSize: 11, marginLeft: 6 }}>{h.category}</span></span>
-                <span style={{ color: pnlPct >= 0 ? "var(--gain)" : "var(--loss)" }}>{sign(pnlPct)}{Math.abs(pnlPct).toFixed(1)}%</span>
-              </div>
-            );
-          })}
-        </div>
-      )}
-
-      {goldHoldings.length > 0 && (
-        <div className="list-card" style={{ marginTop: 18 }}>
-          <div className="list-head">
-            <div className="list-title">Gold Holdings <span style={{ fontSize: 10, background: "var(--gold-soft)", color: "var(--gold)", padding: "2px 7px", borderRadius: 100, marginLeft: 8 }}>via IBJA</span></div>
-            <Link href="/dashboard/gold" className="list-link">View All →</Link>
-          </div>
-          {goldHoldings.slice(0, 5).map((h: any) => (
-            <div key={h.id} style={{ display: "flex", justifyContent: "space-between", padding: "10px 0", borderBottom: "1px solid var(--border)", fontSize: 13 }}>
-              <span style={{ fontWeight: 600 }}>{h.weightGrams}g {h.purity.toUpperCase()}{h.note && <span style={{ fontWeight: 400, color: "var(--text-muted)", fontSize: 11, marginLeft: 6 }}>{h.note}</span>}</span>
-              <span style={{ color: h.pnlPct >= 0 ? "var(--gain)" : "var(--loss)" }}>{sign(h.pnlPct)}{Math.abs(h.pnlPct).toFixed(1)}%</span>
-            </div>
-          ))}
-        </div>
-      )}
-
-      {dividendReceived.length > 0 && (
-        <div className="list-card" style={{ marginTop: 18 }}>
-          <div className="list-head">
-            <div className="list-title">Recent Dividends <span style={{ fontSize: 10, background: "var(--gain-soft)", color: "var(--gain)", padding: "2px 7px", borderRadius: 100, marginLeft: 8 }}>via Dhan</span></div>
-            <Link href="/dashboard/dividends" className="list-link">View All →</Link>
-          </div>
-          {dividendReceived.slice(0, 5).map((r: any) => (
-            <div key={r.id} style={{ display: "flex", justifyContent: "space-between", padding: "10px 0", borderBottom: "1px solid var(--border)", fontSize: 13 }}>
-              <span style={{ fontWeight: 600 }}>{r.symbol}<span style={{ fontWeight: 400, color: "var(--text-muted)", fontSize: 11, marginLeft: 6 }}>{r.record_date}</span></span>
-              <span style={{ color: "var(--gain)", fontWeight: 600 }}>{inr(r.amount)}</span>
-            </div>
-          ))}
-        </div>
-      )}
-
       {(dividendReceived.length > 0 || anyExpected) && (
-        <div className="list-card" style={{ marginTop: 18 }}>
-          <div className="list-head"><div className="list-title">Dividend Income by Month</div><Link href="/dashboard/dividends" className="list-link">View All →</Link></div>
+        <div className="list-card" style={{ marginTop: 24 }}>
+          <div className="list-head"><div className="list-title">Dividend Income by Month</div><Link href="/dashboard/dividends" className="list-link">View all →</Link></div>
+          <div className="chart-well">
           <svg viewBox="0 0 700 150" style={{ width: "100%", height: "auto", display: "block" }} role="img" aria-label="Dividend income by month">
             <defs>
               <pattern id="divHatch" width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
@@ -761,6 +796,7 @@ export default function DashboardOverview() {
               );
             })}
           </svg>
+          </div>
           {anyExpected && (
             <div style={{ display: "flex", gap: 16, fontSize: 11.5, color: "var(--text-muted)", marginTop: 8, flexWrap: "wrap" }}>
               <span><span style={{ display: "inline-block", width: 10, height: 10, borderRadius: 2, background: "var(--gain)", marginRight: 6, verticalAlign: -1 }} />Received</span>
@@ -770,63 +806,71 @@ export default function DashboardOverview() {
         </div>
       )}
 
-      <div className="list-card" style={{ marginTop: 18 }}>
+      <div className="list-card" style={{ marginTop: 24 }}>
         <div className="list-head"><div className="list-title">Portfolio Insights</div></div>
 
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(2, 1fr)", gap: 14, marginBottom: 20 }}>
-          <div>
-            <div style={{ fontSize: 11.5, color: "var(--text-muted)" }}>Estimated Dividend Income</div>
-            <div style={{ fontSize: 18, fontWeight: 600, marginTop: 4, color: "var(--gain)" }}>{inr(estDividendIncome)}</div>
-            <div style={{ fontSize: 10.5, color: "var(--text-muted)", marginTop: 2 }}>from {dividendCount} upcoming payout{dividendCount === 1 ? "" : "s"}</div>
-          </div>
-          <div>
-            <div style={{ fontSize: 11.5, color: "var(--text-muted)" }}>Concentration</div>
-            <div style={{ fontSize: 18, fontWeight: 600, marginTop: 4 }}>{top3Pct.toFixed(0)}%</div>
-            <div style={{ fontSize: 10.5, color: "var(--text-muted)", marginTop: 2 }}>in your top 3 holdings</div>
-          </div>
-        </div>
-
-        <div style={{ marginBottom: 20 }}>
-          <div style={{ fontSize: 11.5, color: "var(--text-muted)", marginBottom: 8 }}>Sector Performance (overall return)</div>
-          {sectorPerfList.map(({ sec, pct }) => (
-            <div key={sec} style={{ display: "flex", justifyContent: "space-between", padding: "7px 0", borderBottom: "1px solid var(--border)", fontSize: 12.5 }}>
-              <span>{sec}</span>
-              <span style={{ color: pct >= 0 ? "var(--gain)" : "var(--loss)" }}>{sign(pct)}{Math.abs(pct).toFixed(1)}%</span>
+        <div className="insight-grid" style={{ marginBottom: 16 }}>
+          <div className="raised insight-card">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--gain)" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M12 3v18M17 7H9.5a3 3 0 0 0 0 6h5a3 3 0 0 1 0 6H6" /></svg>
+            <div>
+              <div className="insight-k">Estimated dividend income</div>
+              <div className="insight-v" style={{ color: "var(--gain)" }}>{inr(estDividendIncome)}</div>
+              <div className="insight-d">from {dividendCount} upcoming payout{dividendCount === 1 ? "" : "s"}</div>
             </div>
-          ))}
+          </div>
+          <div className="raised insight-card">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--gold)" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="8" /><path d="M12 8v5M12 16h.01" /></svg>
+            <div>
+              <div className="insight-k">Concentration</div>
+              <div className="insight-v">{top3Pct.toFixed(0)}%</div>
+              <div className="insight-d">of your stock value is in your top 3 holdings</div>
+            </div>
+          </div>
         </div>
 
-        {mfCategoryList.length > 0 && (
-          <div style={{ marginBottom: 20 }}>
-            <div style={{ fontSize: 11.5, color: "var(--text-muted)", marginBottom: 8 }}>Mutual Fund Asset Mix</div>
-            {mfCategoryList.map(([cat, val]) => (
-              <div key={cat} style={{ display: "flex", justifyContent: "space-between", padding: "7px 0", borderBottom: "1px solid var(--border)", fontSize: 12.5 }}>
-                <span>{cat}</span>
-                <span>{mfTotalCurrent > 0 ? ((val / mfTotalCurrent) * 100).toFixed(0) : 0}% · {inr(val)}</span>
+        <div className="insight-grid">
+          <div className="raised">
+            <div className="insight-k" style={{ marginBottom: 6 }}>Sector performance <span style={{ fontWeight: 400, color: "var(--text-muted)", fontSize: 12 }}>overall return</span></div>
+            {sectorPerfList.map(({ sec, pct }) => (
+              <div key={sec} className="row-line" style={{ padding: "8px 2px", fontSize: 12.5 }}>
+                <span>{sec}</span>
+                <span style={{ color: pct >= 0 ? "var(--gain)" : "var(--loss)", fontWeight: 600 }}>{sign(pct)}{Math.abs(pct).toFixed(1)}%</span>
               </div>
             ))}
           </div>
-        )}
 
-        <div>
-          <div style={{ fontSize: 11.5, color: "var(--text-muted)", marginBottom: 8 }}>Biggest ₹ Impact (overall)</div>
-          {biggestImpact.map((h: any) => (
-            <div key={h.symbol} style={{ display: "flex", justifyContent: "space-between", padding: "7px 0", borderBottom: "1px solid var(--border)", fontSize: 12.5 }}>
-              <span>{h.symbol}</span>
-              <span style={{ color: h.pnl >= 0 ? "var(--gain)" : "var(--loss)" }}>{sign(h.pnl)}{inr(Math.abs(h.pnl))}</span>
+          {mfCategoryList.length > 0 && (
+            <div className="raised">
+              <div className="insight-k" style={{ marginBottom: 6 }}>Mutual fund asset mix</div>
+              {mfCategoryList.map(([cat, val]) => (
+                <div key={cat} className="row-line" style={{ padding: "8px 2px", fontSize: 12.5 }}>
+                  <span>{cat}</span>
+                  <span>{mfTotalCurrent > 0 ? ((val / mfTotalCurrent) * 100).toFixed(0) : 0}% · {inr(val)}</span>
+                </div>
+              ))}
             </div>
-          ))}
+          )}
+
+          <div className="raised">
+            <div className="insight-k" style={{ marginBottom: 6 }}>Biggest ₹ impact <span style={{ fontWeight: 400, color: "var(--text-muted)", fontSize: 12 }}>overall</span></div>
+            {biggestImpact.map((h: any) => (
+              <div key={h.symbol} className="row-line" style={{ padding: "8px 2px", fontSize: 12.5 }}>
+                <span>{h.symbol}</span>
+                <span style={{ color: h.pnl >= 0 ? "var(--gain)" : "var(--loss)", fontWeight: 600 }}>{sign(h.pnl)}{inr(Math.abs(h.pnl))}</span>
+              </div>
+            ))}
+          </div>
         </div>
       </div>
 
-      <div className="two-col" style={{ marginTop: 18 }}>
+      <div className="two-col" style={{ marginTop: 24 }}>
         <div className="list-card">
           <div className="list-head"><div className="list-title">Momentum &amp; Volume</div></div>
           {movers.length === 0 ? <div style={{ color: "var(--text-muted)", fontSize: 12.5 }}>No data yet.</div> :
             movers.slice(0, 4).map((m, i) => (
-              <div key={i} style={{ display: "flex", justifyContent: "space-between", padding: "9px 0", borderBottom: "1px solid var(--border)", fontSize: 12.5 }}>
-                <span><b>{m.symbol}</b><div style={{ fontSize: 11, color: "var(--text-muted)" }}>{m.signal}</div></span>
-                <span style={{ color: m.dayChgPct >= 0 ? "var(--gain)" : "var(--loss)" }}>{sign(m.dayChgPct)}{Math.abs(m.dayChgPct).toFixed(1)}% <span style={{ color: "var(--amber)" }}>{m.volX.toFixed(1)}x</span></span>
+              <div key={i} className="row-line">
+                <span><b style={{ fontWeight: 600 }}>{m.symbol}</b><span className="sub">{m.signal}</span></span>
+                <span style={{ color: m.dayChgPct >= 0 ? "var(--gain)" : "var(--loss)", fontWeight: 600, whiteSpace: "nowrap" }}>{sign(m.dayChgPct)}{Math.abs(m.dayChgPct).toFixed(1)}% <span style={{ color: "var(--amber)" }}>{m.volX.toFixed(1)}x</span></span>
               </div>
             ))}
         </div>
@@ -834,50 +878,52 @@ export default function DashboardOverview() {
           <div className="list-head"><div className="list-title">Stock News</div></div>
           {news.length === 0 ? <div style={{ color: "var(--text-muted)", fontSize: 12.5 }}>No news found.</div> :
             news.map((n, i) => (
-              <a key={i} href={n.url} target="_blank" rel="noreferrer" style={{ display: "block", padding: "9px 0", borderBottom: "1px solid var(--border)", textDecoration: "none", color: "var(--text)" }}>
-                <div style={{ fontSize: 12.5 }}>{n.headline}</div>
-                <div style={{ fontSize: 10.5, color: "var(--text-muted)", marginTop: 3 }}>{n.symbol} · {n.source}</div>
+              <a key={i} href={n.url} target="_blank" rel="noreferrer" style={{ display: "block", padding: "11px 4px", borderBottom: "1px solid var(--border)", textDecoration: "none", color: "var(--text)" }}>
+                <div className="news-sym">{n.symbol}<span style={{ color: "var(--text-muted)", fontWeight: 400, letterSpacing: 0, marginLeft: 8 }}>{n.source}</span></div>
+                <div style={{ fontSize: 13, marginTop: 3, lineHeight: 1.45 }}>{n.headline}</div>
               </a>
             ))}
         </div>
       </div>
 
       <div className="list-card" style={{ marginTop: 18, marginBottom: 40 }}>
-        <div className="list-head"><div className="list-title">Dividends &amp; Earnings</div></div>
+        <div className="list-head"><div className="list-title">Dividends &amp; Earnings</div><Link href="/dashboard/dividends" className="list-link">View all →</Link></div>
         {dividendSource && dividendSource.fromSaved > 0 && (
           <div style={{ fontSize: 11.5, color: "var(--text-muted)", marginBottom: 8 }}>
             NSE didn&apos;t respond just now. {dividendSource.fromSaved} dividend{dividendSource.fromSaved === 1 ? "" : "s"} shown from saved data
             {dividendSource.savedAt ? ` (last confirmed ${new Date(dividendSource.savedAt).toLocaleString("en-IN", { day: "numeric", month: "short", hour: "numeric", minute: "2-digit" })})` : ""}.
           </div>
         )}
-        {events.length === 0 ? <div style={{ color: "var(--text-muted)", fontSize: 12.5 }}>No upcoming events found.</div> :
-          events.map((e, i) => {
-            let dividendAmount: number | null = null;
-            if (e.type === "dividend") {
-              const holding = data.holdings.find((h: any) => h.symbol === e.symbol);
-              // Matches "Rs" or "Re" (singular rupee, e.g. "Re 1 Per Share")
-              const amountMatch = (e.label || "").match(/R[se]\.?\s*([\d.]+)/i);
-              if (holding && amountMatch) {
-                dividendAmount = parseFloat(amountMatch[1]) * holding.qty;
+        {events.length === 0 ? <div style={{ color: "var(--text-muted)", fontSize: 12.5 }}>No upcoming events found.</div> : (
+          <div className="ev-grid">
+            {events.map((e, i) => {
+              let dividendAmount: number | null = null;
+              if (e.type === "dividend") {
+                const holding = data.holdings.find((h: any) => h.symbol === e.symbol);
+                // Matches "Rs" or "Re" (singular rupee, e.g. "Re 1 Per Share")
+                const amountMatch = (e.label || "").match(/R[se]\.?\s*([\d.]+)/i);
+                if (holding && amountMatch) {
+                  dividendAmount = parseFloat(amountMatch[1]) * holding.qty;
+                }
               }
-            }
-            return (
-              <div key={i} style={{ display: "flex", justifyContent: "space-between", padding: "10px 0", borderBottom: "1px solid var(--border)", fontSize: 12.5 }}>
-                <span>
-                  <span style={{ fontSize: 9.5, fontWeight: 700, padding: "2px 7px", borderRadius: 100, marginRight: 8, background: e.type === "dividend" ? "var(--gold-soft)" : "var(--amber-soft)", color: e.type === "dividend" ? "var(--gold)" : "var(--amber)" }}>
-                    {e.type.toUpperCase()}
-                  </span>
-                  {e.symbol} — {e.label}
-                </span>
-                <span style={{ textAlign: "right" }}>
+              return (
+                <div key={i} className="raised">
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
+                    <b style={{ fontSize: 13.5, fontWeight: 600 }}>{e.symbol}</b>
+                    <span style={{ fontSize: 9.5, fontWeight: 700, padding: "2px 7px", borderRadius: 100, background: e.type === "dividend" ? "var(--gold-soft)" : "var(--amber-soft)", color: e.type === "dividend" ? "var(--gold)" : "var(--amber)" }}>
+                      {e.type.toUpperCase()}
+                    </span>
+                  </div>
+                  <div className="ev-date">{e.date}</div>
+                  <div className="ev-label">{e.label}</div>
                   {dividendAmount !== null && (
-                    <div style={{ color: "var(--gain)", fontWeight: 600, fontSize: 12.5 }}>{inr(dividendAmount)}</div>
+                    <div style={{ color: "var(--gain)", fontWeight: 600, fontSize: 13, marginTop: 6 }}>{inr(dividendAmount)} <span style={{ color: "var(--text-muted)", fontWeight: 400, fontSize: 11.5 }}>expected</span></div>
                   )}
-                  <div style={{ color: "var(--text-muted)", fontSize: dividendAmount !== null ? 10.5 : 12.5 }}>{e.date}</div>
-                </span>
-              </div>
-            );
-          })}
+                </div>
+              );
+            })}
+          </div>
+        )}
       </div>
     </div>
   );

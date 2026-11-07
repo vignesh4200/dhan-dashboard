@@ -166,6 +166,11 @@ export default function HoldingsPage() {
   const [view, setView] = useState<View>("table");
   const [filter, setFilter] = useState("all");
   const [query, setQuery] = useState("");
+  // Pre-fill from the dashboard header search (/dashboard/holdings?q=…).
+  useEffect(() => {
+    const q = new URLSearchParams(window.location.search).get("q");
+    if (q) setQuery(q);
+  }, []);
   const [sortKey, setSortKey] = useState<SortKey>("pnlPct");
   const [selected, setSelected] = useState<string | null>(null);
 
