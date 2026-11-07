@@ -47,10 +47,11 @@ export async function GET(req: NextRequest) {
     const forceRefresh = req.nextUrl.searchParams.get("refresh") === "1";
     const forceFull = req.nextUrl.searchParams.get("full") === "1";
 
-    const [{ data: creds }, { data: cache }, { data: snap }] = await Promise.all([
+    const [{ data: creds }, { data: cache }, { data: snap }, { data: costRows }] = await Promise.all([
       supabaseAdmin.from("dhan_credentials").select("access_token_encrypted").eq("user_id", user.id).maybeSingle(),
       supabaseAdmin.from("trade_history_cache").select("trades, fetched_at, synced_to").eq("user_id", user.id).maybeSingle(),
       supabaseAdmin.from("portfolio_snapshots").select("holdings").eq("user_id", user.id).order("captured_at", { ascending: false }).limit(1).maybeSingle(),
+      supabaseAdmin.from("cost_basis_overrides").select("isin, credit_date, price, note").eq("user_id", user.id),
     ]);
 
     const today = istToday();
@@ -132,7 +133,7 @@ export async function GET(req: NextRequest) {
     // Until the backfill finishes, return progress only — partial history
     // would show a misleading P&L.
     if (!sync.complete) {
-      return NextResponse.json({ sync, trades: [], unmatched: [], mismatches: [], totals: { rawTrades: raw.length, equityTrades: raw.length, firstTrade: null, lastTrade: null }, fetchedAt, syncError });
+      return NextResponse.json({ sync, trades: [], unmatched: [], actions: [], mismatches: [], totals: { rawTrades: raw.length, equityTrades: raw.length, firstTrade: null, lastTrade: null }, fetchedAt, syncError });
     }
 
     // Resolve ISIN → NSE symbol (trade history carries only company names).
@@ -145,7 +146,15 @@ export async function GET(req: NextRequest) {
     const holdings: any[] = Array.isArray(snap?.holdings) ? snap!.holdings : [];
     for (const h of holdings) if (h.isin && h.symbol && !isinToSymbol[h.isin]) isinToSymbol[h.isin] = h.symbol;
 
-    const result = buildClosedTrades(raw, isinToSymbol);
+    // Costs you've saved for ₹0 credits (IPO allotments, transfers in) —
+    // see /api/pnl/cost-basis and lib/pnl-engine.ts buildClosedTrades.
+    const costOverrides: Record<string, number> = {};
+    for (const r of costRows || []) costOverrides[`${r.isin}|${String(r.credit_date).slice(0, 10)}`] = Number(r.price);
+
+    const result = buildClosedTrades(raw, isinToSymbol, costOverrides);
+    const notes: Record<string, string> = {};
+    for (const r of costRows || []) if (r.note) notes[`${r.isin}|${String(r.credit_date).slice(0, 10)}`] = r.note;
+    const actions = result.actions.map((a) => ({ ...a, note: notes[`${a.isin}|${a.date}`] || null }));
 
     // Reconcile what FIFO thinks you still hold against Dhan's actual
     // holdings. A gap usually means a split, bonus, or shares from before
@@ -167,6 +176,7 @@ export async function GET(req: NextRequest) {
       sync,
       trades: result.trades,
       unmatched: result.unmatched,
+      actions,
       mismatches,
       totals: result.totals,
       fetchedAt,

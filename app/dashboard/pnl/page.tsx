@@ -4,7 +4,7 @@ import { useRouter } from "next/navigation";
 import s from "./pnl.module.css";
 import {
   computeAnalytics, taxByFy, tradesToCsv,
-  type Analytics, type ClosedTrade, type UnmatchedSell,
+  type Analytics, type ClosedTrade, type UnmatchedSell, type CorporateAction,
 } from "@/lib/pnl-engine";
 
 /* Realized P&L — every closed stock trade, FIFO-matched from full Dhan
@@ -12,9 +12,11 @@ import {
    the Tax statement tab works one financial year at a time. */
 
 type Mismatch = { isin: string; symbol: string; held: number; fromHistory: number };
+type Action = CorporateAction & { note?: string | null };
 type Payload = {
   trades: ClosedTrade[];
   unmatched: UnmatchedSell[];
+  actions?: Action[];
   mismatches: Mismatch[];
   totals: { rawTrades: number; equityTrades: number; firstTrade: string | null; lastTrade: string | null };
   fetchedAt: string | null;
@@ -300,7 +302,7 @@ function TradesTable({ trades, limit, onMore }: { trades: ClosedTrade[]; limit?:
 
 /* ---------- Tax statement tab ---------- */
 
-function TaxTab({ all, data, onCheck }: { all: ClosedTrade[]; data: Payload; onCheck?: () => void }) {
+function TaxTab({ all, data, onReload }: { all: ClosedTrade[]; data: Payload; onReload: () => void }) {
   const fys = useMemo(() => [...new Set(all.map((t) => t.fy))].sort().reverse(), [all]);
   const [fy, setFy] = useState(fys[0]);
   useEffect(() => { if (!fys.includes(fy)) setFy(fys[0]); }, [fys, fy]);
@@ -458,37 +460,113 @@ function TaxTab({ all, data, onCheck }: { all: ClosedTrade[]; data: Payload; onC
         </div>
       </Card>
 
-      <DataChecks data={data} />
+      <DataChecks data={data} onReload={onReload} />
     </>
   );
 }
 
-function DataChecks({ data }: { data: Payload }) {
+const ACTION_TEXT: Record<CorporateAction["kind"], [string, string]> = {
+  SPLIT: [s.tagS, "Split"],
+  ISIN_CHANGE: [s.tagS, "ISIN change"],
+  BONUS: [s.tagI, "Bonus"],
+  SAVED_COST: [s.tagL, "Cost saved"],
+  COST_NEEDED: [s.tagL, "Cost needed"],
+};
+
+function CostEditor({ a, onSaved }: { a: Action; onSaved: () => void }) {
+  const [price, setPrice] = useState(a.price ? String(a.price) : "");
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState<string | null>(null);
+  const call = async (method: "POST" | "DELETE") => {
+    setBusy(true); setMsg(null);
+    const r = await fetch("/api/pnl/cost-basis", {
+      method,
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ isin: a.isin, date: a.date, price: Number(price), note: a.note || `${a.symbol} — ${a.qty} sh credited ${a.date}` }),
+    }).then((x) => x.json()).catch((e) => ({ error: String(e) }));
+    setBusy(false);
+    if (r?.error) setMsg(r.error); else onSaved();
+  };
+  const id = `cost-${a.isin}-${a.date}`;
+  return (
+    <span style={{ display: "inline-flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
+      <label htmlFor={id} className={s.mut} style={{ fontSize: 12 }}>₹/share</label>
+      <input id={id} type="number" min="0" step="0.01" inputMode="decimal" className={s.input} style={{ width: 96, padding: "6px 9px" }}
+        value={price} onChange={(e) => setPrice(e.target.value)} placeholder="Issue price" />
+      <button type="button" className={`${s.btn} ${s.btnGold}`} style={{ minHeight: 32 }} disabled={busy || !(Number(price) > 0)} onClick={() => call("POST")}>
+        {busy ? "Saving…" : "Save"}
+      </button>
+      {a.kind === "SAVED_COST" && (
+        <button type="button" className={s.btn} style={{ minHeight: 32 }} disabled={busy} onClick={() => call("DELETE")}>Remove</button>
+      )}
+      {msg && <span className={s.dn} style={{ fontSize: 12 }}>{msg}</span>}
+    </span>
+  );
+}
+
+function DataChecks({ data, onReload }: { data: Payload; onReload: () => void }) {
+  const actions = data.actions || [];
+  const credits = actions.filter((a) => a.kind === "COST_NEEDED" || a.kind === "SAVED_COST");
+  const auto = actions.filter((a) => a.kind === "SPLIT" || a.kind === "BONUS" || a.kind === "ISIN_CHANGE");
   const n = data.unmatched.length + data.mismatches.length;
   return (
-    <section className={s.card} id="data-checks">
-      <div className={s.cardHead}>
-        <h2 className={s.cardTitle}>Data checks</h2>
-        <span className={s.cardSub}>
-          {data.totals.equityTrades} equity trades from {dshort(data.totals.firstTrade)} to {dshort(data.totals.lastTrade)}
-        </span>
-      </div>
-      {n === 0 && <div className={s.mut} style={{ fontSize: 13 }}>Every sell matched a buy, and what's left matches your Dhan holdings.</div>}
-      {data.unmatched.map((u, i) => (
-        <div key={"u" + i} className={s.checkRow}>
-          <span className={`${s.tag} ${s.tagS}`}>No buy found</span>
-          <b>{u.symbol}</b>
-          <span className={s.what}>Sold {u.qty} @ {u.sellPrice.toFixed(2)} on {dshort(u.sellDate)} ({inr(u.sellValue)}). Bought before the history window, or a bonus/IPO/transfer credit — left out of P&amp;L.</span>
+    <>
+      <section className={s.card} id="credits">
+        <div className={s.cardHead}>
+          <h2 className={s.cardTitle}>Shares credited at ₹0</h2>
+          <span className={s.cardSub}>Dhan records IPO allotments, bonuses and split shares as ₹0 buys</span>
         </div>
-      ))}
-      {data.mismatches.map((m) => (
-        <div key={m.isin} className={s.checkRow}>
-          <span className={`${s.tag} ${s.tagL}`}>Qty mismatch</span>
-          <b>{m.symbol}</b>
-          <span className={s.what}>Trade history leaves {m.fromHistory}, Dhan holds {m.held}. Usually a split, bonus or older shares — this stock's P&amp;L may be off.</span>
+        {credits.length === 0 && auto.length === 0 && <div className={s.mut} style={{ fontSize: 13 }}>No ₹0 credits in your history.</div>}
+        {credits.map((a) => (
+          <div key={`${a.isin}|${a.date}`} className={s.checkRow}>
+            <span className={`${s.tag} ${ACTION_TEXT[a.kind][0]}`}>{ACTION_TEXT[a.kind][1]}</span>
+            <b>{a.symbol}</b>
+            <span className={s.what}>
+              {a.qty} shares credited {dshort(a.date)}
+              {a.kind === "COST_NEEDED"
+                ? " with no cost — IPO allotment or transfer-in? Enter the price paid per share; sales of these shares stay out of P&L until you do."
+                : ` · cost ₹${a.price} per share${a.note ? ` · ${a.note}` : ""}`}
+            </span>
+            <CostEditor a={a} onSaved={onReload} />
+          </div>
+        ))}
+        {auto.map((a) => (
+          <div key={`${a.kind}|${a.isin}|${a.date}`} className={s.checkRow}>
+            <span className={`${s.tag} ${ACTION_TEXT[a.kind][0]}`}>{ACTION_TEXT[a.kind][1]}</span>
+            <b>{a.symbol}</b>
+            <span className={s.what}>
+              {a.kind === "SPLIT" && `${dshort(a.date)}: ${a.qty} extra shares at ₹0 on the new ISIN — handled as a 1:${a.ratio} split. Earlier buys were restated to ${a.ratio}× quantity at 1/${a.ratio} price, keeping their original dates.`}
+              {a.kind === "BONUS" && `${dshort(a.date)}: ${a.qty} bonus shares at ₹0 cost, held from the credit date (as the tax rules treat bonus shares).`}
+              {a.kind === "ISIN_CHANGE" && `${dshort(a.date)}: ISIN changed with no new shares — buys under the old ISIN carried over.`}
+            </span>
+          </div>
+        ))}
+      </section>
+
+      <section className={s.card} id="data-checks">
+        <div className={s.cardHead}>
+          <h2 className={s.cardTitle}>Data checks</h2>
+          <span className={s.cardSub}>
+            {data.totals.equityTrades} equity trades from {dshort(data.totals.firstTrade)} to {dshort(data.totals.lastTrade)}
+          </span>
         </div>
-      ))}
-    </section>
+        {n === 0 && <div className={s.mut} style={{ fontSize: 13 }}>Every sell matched a buy, and what&apos;s left matches your Dhan holdings.</div>}
+        {data.unmatched.map((u, i) => (
+          <div key={"u" + i} className={s.checkRow}>
+            <span className={`${s.tag} ${s.tagS}`}>Left out</span>
+            <b>{u.symbol}</b>
+            <span className={s.what}>Sold {u.qty} @ {u.sellPrice.toFixed(2)} on {dshort(u.sellDate)} ({inr(u.sellValue)}). {u.reason}.</span>
+          </div>
+        ))}
+        {data.mismatches.map((m) => (
+          <div key={m.isin} className={s.checkRow}>
+            <span className={`${s.tag} ${s.tagL}`}>Qty mismatch</span>
+            <b>{m.symbol}</b>
+            <span className={s.what}>Trade history leaves {m.fromHistory}, Dhan holds {m.held}. Usually older shares or an unrecorded corporate action — this stock&apos;s P&amp;L may be off.</span>
+          </div>
+        ))}
+      </section>
+    </>
   );
 }
 
@@ -607,7 +685,8 @@ export default function PnlPage() {
     );
   }
 
-  const issues = data.unmatched.length + data.mismatches.length;
+  const costNeeded = (data.actions || []).filter((x) => x.kind === "COST_NEEDED").length;
+  const issues = data.unmatched.length + data.mismatches.length + costNeeded;
   const synced = data.fetchedAt ? new Date(data.fetchedAt).toLocaleString("en-IN", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" }) : "never";
   const periodLabel = period === "ALL" ? "all time" : period === "CUSTOM" ? "custom range" : shortFy(period);
 
@@ -636,7 +715,7 @@ export default function PnlPage() {
       </div>
 
       {tab === "tax" ? (
-        <TaxTab all={data.trades} data={data} />
+        <TaxTab all={data.trades} data={data} onReload={() => load()} />
       ) : (
         <>
           <div className={s.controls}>
@@ -752,7 +831,8 @@ export default function PnlPage() {
                 <div className={s.note}>
                   <b>{issues} item{issues > 1 ? "s" : ""} to review.</b>
                   {data.unmatched.length > 0 && <span>{data.unmatched.length} sell{data.unmatched.length > 1 ? "s" : ""} had no buy in your Dhan history and {data.unmatched.length > 1 ? "were" : "was"} left out rather than guessed.</span>}
-                  {data.mismatches.length > 0 && <span>{data.mismatches.length} stock{data.mismatches.length > 1 ? "s" : ""} where history and holdings disagree (split/bonus?).</span>}
+                  {data.mismatches.length > 0 && <span>{data.mismatches.length} stock{data.mismatches.length > 1 ? "s" : ""} where history and holdings disagree.</span>}
+                  {costNeeded > 0 && <span>{costNeeded} ₹0 credit{costNeeded > 1 ? "s" : ""} (IPO/transfer) need a cost.</span>}
                   <button type="button" className={s.linkBtn} onClick={() => setTab("tax")}>Review in Tax statement →</button>
                 </div>
               )}

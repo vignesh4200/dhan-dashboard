@@ -103,6 +103,7 @@ export type EngineResult = {
   trades: ClosedTrade[];
   unmatched: UnmatchedSell[];
   openLots: OpenLot[];
+  actions: CorporateAction[];
   totals: { rawTrades: number; equityTrades: number; firstTrade: string | null; lastTrade: string | null };
 };
 
@@ -175,40 +176,87 @@ export function tradeKey(t: RawDhanTrade) {
   return [t.exchangeTradeId, t.orderId, t.transactionType, t.tradedQuantity, t.tradedPrice, t.exchangeTime].join("|");
 }
 
-type Lot = { date: string; qty: number; price: number; chargesPerShare: ChargeBreakup };
-type Fill = { t: RawDhanTrade; date: string; time: string; qty: number; price: number; cps: ChargeBreakup };
+type Lot = { date: string; qty: number; price: number; chargesPerShare: ChargeBreakup; unknownCost?: boolean; srcIsin: string };
+type Fill = { t: RawDhanTrade; isin: string; date: string; time: string; qty: number; price: number; cps: ChargeBreakup };
+
+// Same company, same equity line: an ISIN is IN + E + 4-char issuer + 2-char
+// security type + 2-char serial + check digit. A face-value split (or a
+// plain ISIN change) issues a new serial, so INE249Z01012 → INE249Z01020
+// are one stock. Grouping on the first 9 characters keeps lots continuous
+// across the change. Other share classes (DVR, partly paid: IN9…) differ
+// earlier in the code and stay separate.
+export function companyKey(isin?: string | null, securityId?: string | null) {
+  if (isin && /^INE[A-Z0-9]{9}$/.test(isin)) return isin.slice(0, 9);
+  return isin || `SEC:${securityId}`;
+}
+
+// Dhan books shares that arrive without a trade as BUYs at ₹0, dated the
+// credit day (00:00): IPO allotments, bonus shares, the extra shares from a
+// split, transfers in. Each is resolved before that day's trades:
+//   • a saved cost entry (overrides[`${isin}|${date}`]) always wins
+//   • new ISIN of a stock you already hold → SPLIT: existing lots are
+//     restated to qty × ratio at price ÷ ratio (original dates kept), and
+//     the ₹0 credit is dropped. ratio = (held + credited) / held
+//   • same ISIN as a stock you already hold → BONUS: a ₹0-cost lot dated
+//     the credit day, which is how the Income Tax Act treats bonus shares
+//   • nothing held → IPO allotment / transfer-in with unknown cost: kept as
+//     a lot, but any sale of it is held out of P&L until a cost is saved
+export type CorporateAction = {
+  kind: "SPLIT" | "ISIN_CHANGE" | "BONUS" | "SAVED_COST" | "COST_NEEDED";
+  isin: string;
+  oldIsin?: string;
+  symbol: string;
+  name: string;
+  date: string;
+  qty: number;
+  ratio?: number;
+  price?: number;
+};
 
 export function buildClosedTrades(
   raw: RawDhanTrade[],
-  isinToSymbol: Record<string, string> = {}
+  isinToSymbol: Record<string, string> = {},
+  costOverrides: Record<string, number> = {}
 ): EngineResult {
   const eq = raw.filter(isEquityTrade);
-  const byIsin = new Map<string, Fill[]>();
+  const byKey = new Map<string, Fill[]>();
   const names: Record<string, string> = {};
 
   for (const t of eq) {
-    const key = t.isin || `SEC:${t.securityId}`;
+    const isin = t.isin || `SEC:${t.securityId}`;
+    const key = companyKey(t.isin, t.securityId);
     const qty = num(t.tradedQuantity);
     if (qty <= 0) continue;
     const c = chargesOf(t);
     const cps = zeroCharges();
     addScaled(cps, c, 1 / qty);
-    const fill: Fill = { t, date: istDate(t), time: istTime(t), qty, price: num(t.tradedPrice), cps };
-    if (!byIsin.has(key)) byIsin.set(key, []);
-    byIsin.get(key)!.push(fill);
-    names[key] = names[key] || String(t.customSymbol || t.tradingSymbol || key);
+    const fill: Fill = { t, isin, date: istDate(t), time: istTime(t), qty, price: num(t.tradedPrice), cps };
+    if (!byKey.has(key)) byKey.set(key, []);
+    byKey.get(key)!.push(fill);
+    // Dhan's names vary per record ("ATHER ENERGY LIMITED", "Ather Energy",
+    // "Shree TirupatiBa"); prefer a mixed-case one, then the longest.
+    const nm = String(t.customSymbol || t.tradingSymbol || isin);
+    const score = (n: string) => (n !== n.toUpperCase() ? 1000 : 0) + n.length;
+    if (!names[key] || score(nm) > score(names[key])) names[key] = nm;
   }
 
   const trades: ClosedTrade[] = [];
   const unmatched: UnmatchedSell[] = [];
   const openLots: OpenLot[] = [];
+  const actions: CorporateAction[] = [];
 
-  for (const [isin, fills] of byIsin) {
-    const name = names[isin];
-    const symbol = isinToSymbol[isin] || fills.find((f) => f.t.tradingSymbol)?.t.tradingSymbol || name;
+  for (const [, fills] of byKey) {
     fills.sort((a, b) => (a.date + a.time).localeCompare(b.date + b.time));
+    const latestIsin = fills[fills.length - 1].isin;
+    const name = names[companyKey(latestIsin)] || latestIsin;
+    const symbolOf = (isin: string) =>
+      isinToSymbol[isin] || isinToSymbol[latestIsin] || fills.find((f) => f.isin === isin && f.t.tradingSymbol)?.t.tradingSymbol || name;
+    const symbol = symbolOf(latestIsin);
 
     const lots: Lot[] = [];
+    let currentIsin: string | null = null;
+    const heldQty = () => lots.reduce((a, l) => a + l.qty, 0);
+
     const days = new Map<string, Fill[]>();
     for (const f of fills) {
       if (!days.has(f.date)) days.set(f.date, []);
@@ -216,16 +264,57 @@ export function buildClosedTrades(
     }
 
     for (const [date, dayFills] of days) {
-      const buys = dayFills.filter((f) => f.t.transactionType === "BUY").map((f) => ({ ...f }));
-      const sells = dayFills.filter((f) => f.t.transactionType !== "BUY").map((f) => ({ ...f }));
+      const isZero = (f: Fill) => f.t.transactionType === "BUY" && f.price <= 0;
+
+      // Step 0: ₹0 credits (and plain ISIN changes) before the day's trades.
+      const zeros = dayFills.filter(isZero);
+      const byIsinZ = new Map<string, Fill[]>();
+      for (const z of zeros) { if (!byIsinZ.has(z.isin)) byIsinZ.set(z.isin, []); byIsinZ.get(z.isin)!.push(z); }
+      for (const [zIsin, zs] of byIsinZ) {
+        const credited = zs.reduce((a, z) => a + z.qty, 0);
+        const saved = costOverrides[`${zIsin}|${date}`];
+        const held = heldQty();
+        if (saved !== undefined && saved > 0) {
+          lots.push({ date, qty: credited, price: saved, chargesPerShare: zeroCharges(), srcIsin: zIsin });
+          actions.push({ kind: "SAVED_COST", isin: zIsin, symbol: symbolOf(zIsin), name, date, qty: credited, price: saved });
+        } else if (held > 0 && currentIsin && zIsin !== currentIsin) {
+          const ratio = (held + credited) / held;
+          for (const l of lots) {
+            l.qty *= ratio;
+            l.price /= ratio;
+            const cps = zeroCharges();
+            addScaled(cps, l.chargesPerShare, 1 / ratio);
+            l.chargesPerShare = cps;
+          }
+          actions.push({ kind: "SPLIT", isin: zIsin, oldIsin: currentIsin, symbol: symbolOf(zIsin), name, date, qty: credited, ratio: Math.round(ratio * 1000) / 1000 });
+        } else if (held > 0) {
+          lots.push({ date, qty: credited, price: 0, chargesPerShare: zeroCharges(), srcIsin: zIsin });
+          actions.push({ kind: "BONUS", isin: zIsin, symbol: symbolOf(zIsin), name, date, qty: credited, price: 0 });
+        } else {
+          lots.push({ date, qty: credited, price: 0, chargesPerShare: zeroCharges(), unknownCost: true, srcIsin: zIsin });
+          actions.push({ kind: "COST_NEEDED", isin: zIsin, symbol: symbolOf(zIsin), name, date, qty: credited });
+        }
+        currentIsin = zIsin;
+      }
+
+      const rest = dayFills.filter((f) => !isZero(f));
+      for (const f of rest) {
+        if (currentIsin && f.isin !== currentIsin && heldQty() > 0 && !actions.some((a) => a.isin === f.isin && a.kind !== "COST_NEEDED")) {
+          actions.push({ kind: "ISIN_CHANGE", isin: f.isin, oldIsin: currentIsin, symbol: symbolOf(f.isin), name, date, qty: heldQty(), ratio: 1 });
+        }
+        currentIsin = f.isin;
+      }
+
+      const buys = rest.filter((f) => f.t.transactionType === "BUY").map((f) => ({ ...f }));
+      const sells = rest.filter((f) => f.t.transactionType !== "BUY").map((f) => ({ ...f }));
 
       // Step 1: same-day buy vs sell → intraday.
       let intradayQty = Math.min(
         buys.reduce((s, f) => s + f.qty, 0),
         sells.reduce((s, f) => s + f.qty, 0)
       );
-      const sellLegs = new Map<Fill, { intraday: Leg[]; intraBuyCost: number; intraBuyCharges: ChargeBreakup; delivery: { lot: Lot; qty: number }[]; unmatched: number }>();
-      for (const s of sells) sellLegs.set(s, { intraday: [], intraBuyCost: 0, intraBuyCharges: zeroCharges(), delivery: [], unmatched: 0 });
+      const sellLegs = new Map<Fill, { intraday: Leg[]; intraBuyCost: number; intraBuyCharges: ChargeBreakup; delivery: { lot: Lot; qty: number }[]; unmatched: number; costNeeded: number }>();
+      for (const s of sells) sellLegs.set(s, { intraday: [], intraBuyCost: 0, intraBuyCharges: zeroCharges(), delivery: [], unmatched: 0, costNeeded: 0 });
 
       let bi = 0;
       for (const s of sells) {
@@ -243,28 +332,29 @@ export function buildClosedTrades(
         }
       }
 
-      // Step 2: leftover buys become delivery lots (before leftover sells of
-      // the same day? No: if both remained, step 1 would have matched them).
-      for (const b of buys) if (b.qty > 0) lots.push({ date, qty: b.qty, price: b.price, chargesPerShare: b.cps });
+      // Step 2: leftover buys become delivery lots.
+      for (const b of buys) if (b.qty > 0) lots.push({ date, qty: b.qty, price: b.price, chargesPerShare: b.cps, srcIsin: b.isin });
 
       // Step 3: leftover sells consume older lots FIFO.
       for (const s of sells) {
         const rec = sellLegs.get(s)!;
         let need = s.qty;
-        while (need > 0 && lots.length > 0) {
+        while (need > 1e-9 && lots.length > 0) {
           const lot = lots[0];
           const q = Math.min(need, lot.qty);
-          rec.delivery.push({ lot: { ...lot }, qty: q });
+          if (lot.unknownCost) rec.costNeeded += q;
+          else rec.delivery.push({ lot: { ...lot }, qty: q });
           lot.qty -= q; need -= q;
           if (lot.qty <= 1e-9) lots.shift();
         }
-        rec.unmatched = need;
+        rec.unmatched = need > 1e-9 ? need : 0;
       }
 
       // Emit closed trades for each sell fill.
       for (const [s, rec] of sellLegs) {
         const sellPrice = s.price;
         const sellCps = s.cps;
+        const isin = s.isin;
         const base = { isin, symbol, name, sellDate: date, sellTime: s.time, fy: fyOf(date), month: date.slice(0, 7) };
         const idBase = `${isin}|${s.t.orderId || ""}|${s.t.exchangeTradeId || ""}|${date}${s.time}`;
 
@@ -288,26 +378,33 @@ export function buildClosedTrades(
             const legs: Leg[] = g.map((d) => {
               buyValue += d.qty * d.lot.price;
               addScaled(cb, d.lot.chargesPerShare, d.qty);
-              return { buyDate: d.lot.date, buyPrice: d.lot.price, qty: d.qty, holdingDays: daysBetween(d.lot.date, date) };
+              return { buyDate: d.lot.date, buyPrice: d.lot.price, qty: r2(d.qty), holdingDays: daysBetween(d.lot.date, date) };
             });
             addScaled(cb, sellCps, qty);
-            trades.push(finish({ ...base, id: idBase + "|" + type[0], type, qty, legs, buyValue, sellValue: qty * sellPrice, chargeBreakup: cb }));
+            trades.push(finish({ ...base, id: idBase + "|" + type[0], type, qty: r2(qty), legs, buyValue, sellValue: qty * sellPrice, chargeBreakup: cb }));
           }
         }
 
+        if (rec.costNeeded > 0) {
+          unmatched.push({
+            isin, symbol, name, qty: r2(rec.costNeeded), sellDate: date, sellPrice,
+            sellValue: r2(rec.costNeeded * sellPrice),
+            reason: "Shares credited at ₹0 (IPO allotment or transfer-in) — save their cost to include this sale",
+          });
+        }
         if (rec.unmatched > 0) {
           unmatched.push({
-            isin, symbol, name, qty: rec.unmatched, sellDate: date, sellPrice,
+            isin, symbol, name, qty: r2(rec.unmatched), sellDate: date, sellPrice,
             sellValue: r2(rec.unmatched * sellPrice),
-            reason: "No buy found in trade history — bought before the history window, IPO/bonus/split credit, or transferred in",
+            reason: "No buy found in trade history — bought before the history window or transferred in",
           });
         }
       }
     }
 
-    const openQty = lots.reduce((a, l) => a + l.qty, 0);
-    if (openQty > 0) {
-      openLots.push({ isin, symbol, qty: openQty, avgCost: r2(lots.reduce((a, l) => a + l.qty * l.price, 0) / openQty) });
+    const openQty = heldQty();
+    if (openQty > 1e-9) {
+      openLots.push({ isin: currentIsin || latestIsin, symbol, qty: r2(openQty), avgCost: r2(lots.reduce((a, l) => a + l.qty * l.price, 0) / openQty) });
     }
   }
 
@@ -317,6 +414,7 @@ export function buildClosedTrades(
     trades,
     unmatched: unmatched.sort((a, b) => b.sellDate.localeCompare(a.sellDate)),
     openLots,
+    actions: actions.sort((a, b) => b.date.localeCompare(a.date)),
     totals: { rawTrades: raw.length, equityTrades: eq.length, firstTrade: dates[0] || null, lastTrade: dates[dates.length - 1] || null },
   };
 }
@@ -463,8 +561,9 @@ export function computeAnalytics(trades: ClosedTrade[]): Analytics {
     const hi = HOLD_BUCKETS.findIndex((h) => h.test(t));
     if (hi >= 0) add(byHold[hi], t);
     add(byWeekday[new Date(t.sellDate + "T00:00:00Z").getUTCDay()], t);
-    if (!bySymbol.has(t.isin)) bySymbol.set(t.isin, { ...bucket(t.isin, t.symbol), symbol: t.symbol, name: t.name, qty: 0, bestNet: -Infinity, worstNet: Infinity, lastSell: "" });
-    const s = bySymbol.get(t.isin)!;
+    const ck = companyKey(t.isin);
+    if (!bySymbol.has(ck)) bySymbol.set(ck, { ...bucket(ck, t.symbol), symbol: t.symbol, name: t.name, qty: 0, bestNet: -Infinity, worstNet: Infinity, lastSell: "" });
+    const s = bySymbol.get(ck)!;
     add(s, t);
     s.qty += t.qty;
     s.bestNet = Math.max(s.bestNet, t.net);
