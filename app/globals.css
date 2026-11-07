@@ -1,46 +1,62 @@
 :root{
-  /* Vault theme: steel surfaces, gold accent. Green/red stay reserved for profit/loss. */
-  --ink:#0f1115; --bg:#0f1115; --panel:#1a1d23; --panel-2:#22262e;
-  --card-grad:linear-gradient(160deg,#20242c 0%,#171a20 100%);
-  --border:#262a32; --border-strong:#343944;
-  --text:#e9eaee; --text-muted:#8b919c;
-  --gold:#e5a93a; --gold-soft:rgba(229,169,58,0.14); --gold-ink:#1a1205; --gold-bright:#ffd88a;
-  --purple:var(--gold); --purple-2:#8a5a12;
-  --amber:#6cb6ff; --amber-soft:rgba(108,182,255,0.14);
-  --gain:#3ecf8e; --gain-soft:rgba(62,207,142,0.14);
-  --loss:#ff6b6b; --loss-soft:rgba(255,107,107,0.13);
-  --sidebar-bg:#0b0d10;
-  --c-stocks:#6cb6ff; --c-mf:#b39cff; --c-gold:#e5a93a; --c-div:#3ecf8e;
-  --font-display:'Sora', system-ui, sans-serif; --font-body:'Inter Tight', system-ui, sans-serif;
+  /* Aurora Glass theme (Nov 2026): frosted translucent surfaces over a deep
+     navy background lit by soft violet / teal / pink glows (see body).
+     Variable names are kept from the old Vault theme so every page restyles
+     without code changes: --gold* is now the periwinkle accent; --c-gold
+     stays the gold-asset colour. Green/red stay reserved for profit/loss. */
+  --ink:#070b17; --bg:#0a0f1e; --panel:rgba(20,26,48,0.78); --panel-2:rgba(255,255,255,0.07);
+  --card-grad:linear-gradient(160deg,rgba(255,255,255,0.085) 0%,rgba(255,255,255,0.035) 100%);
+  --surface-inset:rgba(255,255,255,0.05); --surface-solid:#111831;
+  --glass-blur:blur(18px) saturate(140%);
+  --glass-edge:inset 0 1px 0 rgba(255,255,255,0.10);
+  --border:rgba(255,255,255,0.11); --border-strong:rgba(255,255,255,0.22);
+  --text:#eef1fa; --text-muted:#aab3c8;
+  --gold:#9db8ff; --gold-soft:rgba(157,184,255,0.16); --gold-ink:#0a0f1e; --gold-bright:#dbe5ff;
+  --accent-grad:linear-gradient(180deg,#b3c8ff,#859fff);
+  --purple:var(--gold); --purple-2:#5a6fd6;
+  --amber:#5fe0d4; --amber-soft:rgba(95,224,212,0.15);
+  --gain:#5ee3a8; --gain-soft:rgba(94,227,168,0.15);
+  --loss:#ff8f9a; --loss-soft:rgba(255,143,154,0.14);
+  --sidebar-bg:rgba(255,255,255,0.04);
+  --c-stocks:#9db8ff; --c-mf:#5fe0d4; --c-gold:#ffc96b; --c-div:#5ee3a8;
+  --font-display:'Space Grotesk', system-ui, sans-serif; --font-body:'Inter', system-ui, sans-serif;
   /* Numbers use the body face with tabular figures so columns line up; IBM Plex Mono is kept only for code-like bits (login keypad). */
-  --font-mono:'Inter Tight', system-ui, sans-serif; --font-code:'IBM Plex Mono', ui-monospace, monospace;
+  --font-mono:'Inter', system-ui, sans-serif; --font-code:'IBM Plex Mono', ui-monospace, monospace;
   color-scheme:dark;
 }
 *{box-sizing:border-box;}
 html,body{margin:0;padding:0;background:var(--ink);color:var(--text);font-family:var(--font-body);font-variant-numeric:tabular-nums;-webkit-font-smoothing:antialiased;}
+/* The aurora: fixed glows behind everything, so glass panels have something to frost. */
+body{background-color:var(--bg);background-image:
+  radial-gradient(900px 620px at 8% -4%,rgba(110,86,255,0.34),transparent 62%),
+  radial-gradient(820px 620px at 96% 22%,rgba(0,196,180,0.20),transparent 62%),
+  radial-gradient(760px 540px at 38% 108%,rgba(255,120,170,0.14),transparent 62%);
+  background-attachment:fixed;min-height:100vh;}
+::selection{background:rgba(157,184,255,0.35);}
 a{color:inherit;}
 :focus-visible{outline:2px solid var(--gold); outline-offset:2px;}
 button{font-family:inherit;}
 
 .wrap{max-width:1240px;margin:0 auto;padding:0 24px 80px;}
-.panel{background:var(--card-grad);border:1px solid var(--border);border-radius:16px;padding:22px;}
+.panel{background:var(--card-grad);border:1px solid var(--border);border-radius:18px;padding:22px;backdrop-filter:var(--glass-blur);-webkit-backdrop-filter:var(--glass-blur);box-shadow:var(--glass-edge);}
 .badge{display:inline-flex;align-items:center;gap:4px;padding:3px 9px;border-radius:100px;font-weight:600;font-size:12.5px;}
 .badge.up{color:var(--gain);background:var(--gain-soft);}
 
 /* ---------- Dashboard shell (sidebar + marquee) ---------- */
-.marquee-wrap{background:#0a0b0e;border-bottom:1px solid var(--border);overflow:hidden;white-space:nowrap;padding:9px 0;}
+.marquee-wrap{background:rgba(7,11,23,0.55);backdrop-filter:var(--glass-blur);-webkit-backdrop-filter:var(--glass-blur);border-bottom:1px solid var(--border);overflow:hidden;white-space:nowrap;padding:9px 0;}
 .marquee-track{display:inline-flex;animation:scroll-marquee 30s linear infinite;}
 .marquee-item{display:inline-flex;align-items:baseline;gap:7px;padding:0 22px;font-family:var(--font-display);font-size:12px;border-right:1px solid var(--border);}
 @keyframes scroll-marquee{from{transform:translateX(0);}to{transform:translateX(-50%);}}
 @media (prefers-reduced-motion: reduce){.marquee-track{animation:none;overflow-x:auto;}}
 
 .dash-shell{display:grid;grid-template-columns:220px 1fr;min-height:100vh;}
-.dash-sidebar{background:var(--sidebar-bg);border-right:1px solid var(--border);padding:22px 16px;}
+.dash-sidebar{background:var(--sidebar-bg);border-right:1px solid var(--border);padding:22px 16px;backdrop-filter:var(--glass-blur);-webkit-backdrop-filter:var(--glass-blur);}
 .dash-logo{display:flex;align-items:center;gap:9px;margin-bottom:26px;}
-.dash-logo-mark{width:28px;height:28px;border-radius:50%;background:radial-gradient(circle,var(--gold) 0 4px,#2a2e37 5px 8px,var(--gold) 9px 11px,#2a2e37 12px);box-shadow:inset 0 0 0 2px #0006;}
+.dash-logo-mark{width:28px;height:28px;border-radius:9px;background:linear-gradient(135deg,#b3c8ff,#6e56ff 55%,#00c4b4);box-shadow:0 4px 14px -4px rgba(110,86,255,0.7),inset 0 1px 0 rgba(255,255,255,0.4);}
 .dash-logo-text{font-family:var(--font-display);font-weight:700;font-size:15px;}
-.dash-nav-item{display:flex;align-items:center;gap:9px;padding:10px 12px;border-radius:9px;font-size:13px;color:var(--text-muted);margin-bottom:2px;text-decoration:none;}
-.dash-nav-item.active{background:var(--gold-soft);color:var(--text);font-weight:600;}
+.dash-nav-item{display:flex;align-items:center;gap:9px;padding:10px 12px;border-radius:11px;border:1px solid transparent;font-size:13px;color:var(--text-muted);margin-bottom:2px;text-decoration:none;}
+.dash-nav-item.active{background:var(--gold-soft);border-color:rgba(157,184,255,0.35);color:var(--text);font-weight:600;}
+.dash-nav-item:not(.active):hover{background:rgba(255,255,255,0.05);color:var(--text);}
 .dash-nav-item.active .dash-nav-dot{background:var(--gold);opacity:1;}
 .dash-nav-dot{width:6px;height:6px;border-radius:50%;background:currentColor;opacity:0.6;}
 .dash-sidebar-section{font-size:10px;text-transform:uppercase;letter-spacing:0.08em;color:var(--text-muted);margin:22px 0 8px;padding:0 12px;}
@@ -48,23 +64,23 @@ button{font-family:inherit;}
 .dash-main{padding:24px 28px 60px;max-width:1100px;min-width:0;}
 
 .stat-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:14px;}
-.stat-card{background:var(--card-grad);border:1px solid var(--border);border-radius:14px;padding:16px 18px;min-width:0;}
+.stat-card{background:var(--card-grad);border:1px solid var(--border);border-radius:16px;padding:16px 18px;min-width:0;backdrop-filter:var(--glass-blur);-webkit-backdrop-filter:var(--glass-blur);box-shadow:var(--glass-edge);}
 .stat-label{font-size:12.5px;color:var(--text-muted);}
 .stat-value{font-family:var(--font-body);font-size:20px;font-weight:600;margin-top:8px;letter-spacing:-.01em;}
 .stat-sub{font-size:12px;margin-top:5px;color:var(--text-muted);}
-.list-card{background:var(--card-grad);border:1px solid var(--border);border-radius:16px;padding:20px;box-shadow:0 18px 40px -28px #000;}
+.list-card{background:var(--card-grad);border:1px solid var(--border);border-radius:20px;padding:20px;backdrop-filter:var(--glass-blur);-webkit-backdrop-filter:var(--glass-blur);box-shadow:0 20px 50px -30px rgba(0,0,0,0.8),var(--glass-edge);}
 .list-head{display:flex;justify-content:space-between;margin-bottom:12px;}
 .list-title{font-family:var(--font-display);font-size:14.5px;font-weight:600;}
 .list-link{font-size:11.5px;color:var(--gold);font-weight:600;text-decoration:none;}
 .badge.down{color:var(--loss);background:var(--loss-soft);}
 
 .auth-shell{min-height:100vh;display:flex;align-items:center;justify-content:center;padding:20px;}
-.auth-card{width:100%;max-width:380px;background:var(--panel);border:1px solid var(--border-strong);border-radius:16px;padding:32px;}
+.auth-card{width:100%;max-width:380px;background:var(--panel);border:1px solid var(--border-strong);border-radius:20px;padding:32px;backdrop-filter:var(--glass-blur);-webkit-backdrop-filter:var(--glass-blur);}
 .auth-brand{font-family:var(--font-display);font-size:22px;font-weight:600;margin-bottom:6px;}
 .auth-sub{color:var(--text-muted);font-size:13px;margin-bottom:24px;}
 .field-label{font-size:12px;color:var(--text-muted);margin-bottom:6px;display:block;}
 .field-input{width:100%;background:var(--panel-2);border:1px solid var(--border-strong);border-radius:10px;padding:11px 13px;color:var(--text);font-family:var(--font-mono);font-size:14px;margin-bottom:14px;}
-.btn{width:100%;background:linear-gradient(180deg,#f4c264,#d9952a);color:var(--gold-ink);box-shadow:0 2px 0 #7a4e0f,inset 0 1px 0 #fff6;border:none;border-radius:10px;padding:12px;font-weight:600;font-size:14px;cursor:pointer;}
+.btn{width:100%;background:var(--accent-grad);color:var(--gold-ink);box-shadow:0 6px 18px -8px rgba(133,159,255,0.8),inset 0 1px 0 #fff8;border:none;border-radius:12px;padding:12px;font-weight:600;font-size:14px;cursor:pointer;}
 .btn:disabled{opacity:0.5;cursor:not-allowed;}
 .btn-secondary{background:transparent;border:1px solid var(--border-strong);color:var(--text);}
 .auth-error{color:var(--loss);font-size:12.5px;margin-bottom:12px;}
@@ -88,10 +104,12 @@ button{font-family:inherit;}
 /* ---------- Vault dashboard pieces ---------- */
 /* One type system: Sora for titles, Inter Tight (tabular figures) for every label and number. */
 .kpi-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:14px;margin-top:20px;}
-.vault-card{position:relative;background:var(--card-grad);border:1px solid var(--border);border-radius:16px;padding:18px 20px;min-width:0;box-shadow:0 18px 40px -28px #000;display:flex;flex-direction:column;}
-.vault-hero{grid-column:span 2;background:linear-gradient(150deg,#2a2e37,#1a1d23 60%);border-color:var(--border-strong);padding:20px 24px;}
-.vault-hero::after{content:"";position:absolute;inset:8px;border-radius:10px;border:1px solid #ffffff0c;pointer-events:none;}
-.vault-rivet{position:absolute;width:6px;height:6px;border-radius:50%;background:radial-gradient(circle at 35% 35%,#6a707c,#22252c);}
+.vault-card{position:relative;background:var(--card-grad);border:1px solid var(--border);border-radius:20px;padding:18px 20px;min-width:0;backdrop-filter:var(--glass-blur);-webkit-backdrop-filter:var(--glass-blur);box-shadow:0 20px 50px -30px rgba(0,0,0,0.8),var(--glass-edge);display:flex;flex-direction:column;}
+a.vault-card:hover{border-color:var(--border-strong);}
+.vault-hero{grid-column:span 2;background:linear-gradient(150deg,rgba(110,86,255,0.24),rgba(255,255,255,0.05) 55%,rgba(0,196,180,0.10));border-color:var(--border-strong);padding:20px 24px;}
+/* Vault-era decorations, retired with the glass theme. */
+.vault-hero::after{content:none;}
+.vault-rivet{display:none;}
 .vault-label{font-size:12.5px;font-weight:500;color:var(--text-muted);}
 .vault-big{font:600 34px/1.1 var(--font-body);letter-spacing:-.02em;margin-top:6px;color:var(--gold-bright);}
 .vault-mid{font:600 22px/1.15 var(--font-body);letter-spacing:-.01em;margin-top:8px;}
@@ -102,7 +120,7 @@ button{font-family:inherit;}
 .vault-hero-row .val{font-size:15px;font-weight:600;margin-top:3px;}
 .section-label{font-size:11.5px;font-weight:500;color:var(--text-muted);margin:22px 0 -6px;letter-spacing:.02em;}
 .asset-tiles{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;}
-.asset-tile{background:#1b1e25;border:1px solid var(--border);border-radius:12px;padding:14px;display:flex;flex-direction:column;gap:4px;min-width:0;text-decoration:none;color:inherit;}
+.asset-tile{background:var(--surface-inset);border:1px solid var(--border);border-radius:14px;padding:14px;display:flex;flex-direction:column;gap:4px;min-width:0;text-decoration:none;color:inherit;}
 a.asset-tile:hover{border-color:var(--border-strong);}
 .asset-tile .k{display:flex;align-items:center;gap:7px;font-size:12.5px;color:var(--text-muted);}
 .asset-tile .k b{width:8px;height:8px;border-radius:2px;display:block;}
@@ -114,7 +132,7 @@ a.asset-tile:hover{border-color:var(--border-strong);}
 .two-col{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:16px;}
 @media (max-width:760px){
   .dash-shell{grid-template-columns:minmax(0,1fr);}
-  .dash-sidebar{display:flex;align-items:center;gap:4px;overflow-x:auto;padding:10px 12px;border-right:0;border-bottom:1px solid var(--border);}
+  .dash-sidebar{display:flex;align-items:center;gap:4px;overflow-x:auto;padding:10px 12px;border-right:0;border-bottom:1px solid var(--border);position:sticky;top:0;z-index:20;background:rgba(10,15,30,0.7);}
   .dash-logo{margin:0 8px 0 0;}
   .dash-logo-text{white-space:nowrap;}
   .dash-nav-item{white-space:nowrap;margin:0;}
@@ -122,4 +140,10 @@ a.asset-tile:hover{border-color:var(--border-strong);}
   .dash-main{padding:18px max(16px,env(safe-area-inset-right,0px)) 60px max(16px,env(safe-area-inset-left,0px));}
   .two-col{grid-template-columns:minmax(0,1fr);}
   .asset-tiles{grid-template-columns:minmax(0,1fr) minmax(0,1fr);}
+}
+
+/* Glass is costly to paint on low-end phones and unreadable with reduced
+   transparency; fall back to solid surfaces there. */
+@media (prefers-reduced-transparency: reduce){
+  :root{--card-grad:#141b33;--panel:#141b33;--sidebar-bg:#0e1428;--glass-blur:none;}
 }

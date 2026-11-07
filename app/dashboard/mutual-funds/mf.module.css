@@ -54,18 +54,18 @@
 .fundMeta{font-size:12px;color:var(--text-muted);margin-top:4px;line-height:1.6}
 .tag{display:inline-block;font-size:11px;font-weight:600;padding:2px 7px;border-radius:6px;margin-right:6px}
 .tagEq{background:rgba(179,156,255,.14);color:var(--c-mf)}
-.tagHy{background:rgba(108,182,255,.14);color:var(--c-stocks)}
+.tagHy{background:var(--gold-soft);color:var(--c-stocks)}
 .tagDebt{background:var(--gain-soft);color:var(--gain)}
 .tagLock{background:var(--gold-soft);color:var(--gold)}
 .fundVal{text-align:right;flex:none}
 .fundVal .v{font-size:19px;font-weight:600}
 .fundVal .g{font-size:12.5px;margin-top:2px}
 .navRow{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px;margin-top:14px}
-.navRow>div{background:#1b1e25;border:1px solid var(--border);border-radius:10px;padding:9px 11px;min-width:0}
+.navRow>div{background:var(--surface-inset);border:1px solid var(--border);border-radius:10px;padding:9px 11px;min-width:0}
 .navRow span{display:block;font-size:11.5px;color:var(--text-muted)}
 .navRow b{display:block;font-size:14.5px;margin-top:3px;font-weight:600}
 .rets{display:flex;gap:6px;flex-wrap:wrap;margin-top:12px}
-.ret{font-size:11.5px;padding:3px 8px;border-radius:6px;background:#1b1e25;border:1px solid var(--border)}
+.ret{font-size:11.5px;padding:3px 8px;border-radius:6px;background:var(--surface-inset);border:1px solid var(--border)}
 .ret b{font-weight:600;margin-left:4px}
 
 .rangeBar{display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin-top:12px}

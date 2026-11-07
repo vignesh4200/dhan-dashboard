@@ -327,8 +327,8 @@ function PerfChart() {
       >
         <defs>
           <linearGradient id="lineGrad" x1="0" y1="0" x2="1" y2="0">
-            <stop offset="0%" stopColor="#d9952a" />
-            <stop offset="100%" stopColor="#ffd88a" />
+            <stop offset="0%" stopColor="#859fff" />
+            <stop offset="100%" stopColor="#dbe5ff" />
           </linearGradient>
           <filter id="chartGlow" x="-50%" y="-50%" width="200%" height="200%">
             <feGaussianBlur stdDeviation="4" result="blur" />
@@ -352,8 +352,8 @@ function PerfChart() {
         <path d={investedPath} fill="none" stroke="var(--text-muted)" strokeWidth="1.75" strokeLinecap="round" strokeDasharray="5,4" />
         <path d={currentPath} fill="none" stroke="url(#lineGrad)" strokeWidth="3" strokeLinecap="round" filter="url(#chartGlow)" />
 
-        <circle cx={currentCoords[currentCoords.length - 1].x} cy={currentCoords[currentCoords.length - 1].y} r="8" fill="#e5a93a" opacity="0.25" />
-        <circle cx={currentCoords[currentCoords.length - 1].x} cy={currentCoords[currentCoords.length - 1].y} r="4.5" fill="#fff" stroke="#e5a93a" strokeWidth="2.5" />
+        <circle cx={currentCoords[currentCoords.length - 1].x} cy={currentCoords[currentCoords.length - 1].y} r="8" fill="#9db8ff" opacity="0.25" />
+        <circle cx={currentCoords[currentCoords.length - 1].x} cy={currentCoords[currentCoords.length - 1].y} r="4.5" fill="#fff" stroke="#9db8ff" strokeWidth="2.5" />
 
         <text
           x={currentCoords[currentCoords.length - 1].x - 10}
@@ -381,7 +381,7 @@ function PerfChart() {
           return (
             <g>
               <line x1={currentCoords[hoverIdx].x} y1={padTop} x2={currentCoords[hoverIdx].x} y2={padTop + plotH} stroke="var(--text-muted)" strokeWidth="1" strokeDasharray="3,3" />
-              <circle cx={currentCoords[hoverIdx].x} cy={currentCoords[hoverIdx].y} r="5" fill="#fff" stroke="#e5a93a" strokeWidth="2.5" />
+              <circle cx={currentCoords[hoverIdx].x} cy={currentCoords[hoverIdx].y} r="5" fill="#fff" stroke="#9db8ff" strokeWidth="2.5" />
               <circle cx={investedCoords[hoverIdx].x} cy={investedCoords[hoverIdx].y} r="4" fill="var(--text-muted)" />
               <rect x={boxX} y={padTop + 4} width="200" height="52" rx="8" fill="var(--bg)" stroke="var(--border)" strokeWidth="1" />
               <text x={boxX + 12} y={padTop + 22} fontSize="10" fill="var(--text-muted)">{formatLabel(hp.captured_at)}</text>
@@ -709,7 +709,7 @@ export default function DashboardOverview() {
       {dividendReceived.length > 0 && (
         <div className="list-card" style={{ marginTop: 18 }}>
           <div className="list-head">
-            <div className="list-title">Recent Dividends <span style={{ fontSize: 10, background: "rgba(52,211,153,0.14)", color: "var(--gain)", padding: "2px 7px", borderRadius: 100, marginLeft: 8 }}>via Dhan</span></div>
+            <div className="list-title">Recent Dividends <span style={{ fontSize: 10, background: "var(--gain-soft)", color: "var(--gain)", padding: "2px 7px", borderRadius: 100, marginLeft: 8 }}>via Dhan</span></div>
             <Link href="/dashboard/dividends" className="list-link">View All →</Link>
           </div>
           {dividendReceived.slice(0, 5).map((r: any) => (

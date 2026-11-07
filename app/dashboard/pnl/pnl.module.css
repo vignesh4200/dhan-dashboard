@@ -6,7 +6,7 @@
 .btn{all:unset;cursor:pointer;border:1px solid var(--border-strong);color:var(--text);font-size:13px;padding:0 14px;min-height:38px;display:inline-flex;align-items:center;gap:7px;border-radius:10px;box-sizing:border-box}
 .btn:hover{border-color:var(--gold)}
 .btn:disabled{opacity:.5;cursor:not-allowed}
-.btnGold{background:linear-gradient(180deg,#f4c264,#d9952a);color:var(--gold-ink);font-weight:600;border:none;box-shadow:0 2px 0 #7a4e0f}
+.btnGold{background:var(--accent-grad);color:var(--gold-ink);font-weight:600;border:none;box-shadow:0 6px 18px -8px rgba(133,159,255,0.8)}
 .btn:focus-visible,.seg button:focus-visible,.tab:focus-visible,.row:focus-visible{outline:2px solid var(--gold-bright);outline-offset:1px}
 
 .tabs{display:flex;gap:4px;border-bottom:1px solid var(--border);margin-top:18px}
@@ -14,11 +14,11 @@
 .tab[aria-selected="true"]{color:var(--text);font-weight:600;border-bottom-color:var(--gold)}
 
 .controls{display:flex;flex-wrap:wrap;gap:10px;align-items:center;margin-top:14px}
-.seg{display:flex;flex-wrap:wrap;background:#1b1e25;border:1px solid var(--border);border-radius:10px;padding:3px;gap:2px}
+.seg{display:flex;flex-wrap:wrap;background:var(--surface-inset);border:1px solid var(--border);border-radius:10px;padding:3px;gap:2px}
 .seg button{all:unset;cursor:pointer;font-size:12.5px;padding:6px 11px;border-radius:7px;color:var(--text-muted)}
 .seg button[aria-pressed="true"]{background:var(--gold);color:var(--gold-ink);font-weight:600}
 .spacer{flex:1}
-.input{background:#1b1e25;border:1px solid var(--border);border-radius:10px;padding:8px 12px;color:var(--text);font:inherit;font-size:13px;min-width:0}
+.input{background:var(--surface-inset);border:1px solid var(--border);border-radius:10px;padding:8px 12px;color:var(--text);font:inherit;font-size:13px;min-width:0}
 .input:focus{outline:1px solid var(--gold);border-color:var(--gold)}
 .search{width:180px}
 .dates{display:flex;gap:6px;align-items:center;font-size:12px;color:var(--text-muted)}
@@ -30,7 +30,7 @@
 .linkBtn{all:unset;cursor:pointer;color:var(--gold);font-weight:600}
 
 .kpis{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:14px;margin-top:16px}
-.hero{grid-column:span 2;position:relative;background:linear-gradient(150deg,#2a2e37,#1a1d23 60%);border:1px solid var(--border-strong);border-radius:16px;padding:20px 24px;display:flex;flex-direction:column;gap:6px;min-width:0}
+.hero{grid-column:span 2;position:relative;background:linear-gradient(150deg,rgba(255,255,255,0.08),rgba(255,255,255,0.05) 60%);border:1px solid var(--border-strong);border-radius:16px;padding:20px 24px;display:flex;flex-direction:column;gap:6px;min-width:0}
 .hero::after{content:"";position:absolute;inset:8px;border-radius:10px;border:1px solid #ffffff0c;pointer-events:none}
 .heroBig{font-size:34px;font-weight:600;letter-spacing:-.02em}
 .heroRow{display:flex;flex-wrap:wrap;gap:6px 28px;margin-top:auto;padding-top:12px}
@@ -56,14 +56,14 @@
 .legend span{display:inline-flex;align-items:center;gap:6px}
 .curveWrap{position:relative}
 .curve{width:100%;height:220px;display:block}
-.axisL{position:absolute;left:0;transform:translateY(-50%);font-size:11px;color:var(--text-muted);background:#1b1e25;padding-right:6px}
+.axisL{position:absolute;left:0;transform:translateY(-50%);font-size:11px;color:var(--text-muted);background:var(--surface-inset);padding-right:6px}
 .axisX{display:flex;justify-content:space-between;font-size:11px;color:var(--text-muted);margin-top:6px}
 .hoverTip{position:absolute;top:4px;font-size:12px;background:var(--panel-2);border:1px solid var(--border-strong);border-radius:8px;padding:5px 9px;pointer-events:none;white-space:nowrap;transform:translateX(-50%)}
 
 .heat{display:grid;grid-template-columns:70px repeat(12,minmax(0,1fr)) 74px;gap:5px;align-items:center;min-width:620px}
 .heatH{font-size:11px;color:var(--text-muted);text-align:center}
 .heatCell{height:40px;border-radius:7px;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:600;color:#fff}
-.heatEmpty{height:40px;border-radius:7px;background:#1b1e25;border:1px dashed var(--border)}
+.heatEmpty{height:40px;border-radius:7px;background:var(--surface-inset);border:1px dashed var(--border)}
 .scrollX{overflow-x:auto}
 
 .bars{display:flex;flex-direction:column;gap:10px}
@@ -103,7 +103,7 @@
 .pillUp{background:var(--gain-soft);color:var(--gain)}
 .pillDn{background:var(--loss-soft);color:var(--loss)}
 .tag{display:inline-block;font-size:11px;font-weight:600;padding:2px 7px;border-radius:6px}
-.tagI{color:#b39cff;background:rgba(179,156,255,.14)}
+.tagI{color:#c3b4ff;background:rgba(179,156,255,.16)}
 .tagS{color:var(--amber);background:var(--amber-soft)}
 .tagL{color:var(--gold);background:var(--gold-soft)}
 
@@ -125,7 +125,7 @@
 
 .yoy{display:flex;gap:14px;align-items:flex-end;height:180px}
 .yoy > div{flex:1;display:flex;flex-direction:column;align-items:center;gap:5px;height:100%;justify-content:flex-end;min-width:0}
-.yoy i{display:block;width:70%;border-radius:6px 6px 2px 2px;background:#3a404c}
+.yoy i{display:block;width:70%;border-radius:6px 6px 2px 2px;background:rgba(255,255,255,0.14)}
 .yoy .on i{background:var(--gold)}
 .yoy small{font-size:11px;color:var(--text-muted);white-space:nowrap}
 
