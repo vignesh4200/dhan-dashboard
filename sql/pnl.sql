@@ -11,3 +11,6 @@ create table if not exists trade_history_cache (
   fetched_at timestamptz not null default now()
 );
 alter table trade_history_cache enable row level security;
+
+-- Resumable sync: how far the history backfill has reached (applied Nov 2026).
+alter table trade_history_cache add column if not exists synced_to date;

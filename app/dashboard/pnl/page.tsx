@@ -18,8 +18,9 @@ type Payload = {
   mismatches: Mismatch[];
   totals: { rawTrades: number; equityTrades: number; firstTrade: string | null; lastTrade: string | null };
   fetchedAt: string | null;
-  syncNote: string | null;
   syncError: string | null;
+  sync?: { complete: boolean; syncedTo: string | null; historyFrom: string; fetchedNow: number; progress: number };
+  error?: string;
 };
 type Tab = "overview" | "trades" | "tax";
 type TypeF = "ALL" | "DELIVERY" | "INTRADAY" | "LTCG";
@@ -514,16 +515,43 @@ export default function PnlPage() {
   const [outcome, setOutcome] = useState<Outcome>("ALL");
   const [q, setQ] = useState("");
 
-  const load = (mode?: "refresh" | "full") => {
+  const [progress, setProgress] = useState<{ syncedTo: string | null; pct: number } | null>(null);
+
+  // The API downloads history in resumable steps; keep calling until it
+  // reports the sync complete. Non-JSON replies (a platform timeout page)
+  // are retried a couple of times before showing an error.
+  const load = async (mode?: "refresh" | "full") => {
     setSyncing(true);
-    fetch(`/api/pnl${mode ? `?${mode}=1` : ""}`)
-      .then((r) => {
-        if (r.status === 401) { router.push("/login"); return null; }
-        return r.json();
-      })
-      .then((d) => { if (d) { setData(d); setErr(null); } })
-      .catch((e) => setErr(String(e)))
-      .finally(() => setSyncing(false));
+    setErr(null);
+    let first = true, failures = 0;
+    try {
+      for (let step = 0; step < 80; step++) {
+        const r = await fetch(`/api/pnl${first && mode ? `?${mode}=1` : ""}`);
+        first = false;
+        if (r.status === 401) { router.push("/login"); return; }
+        const text = await r.text();
+        let d: Payload;
+        try { d = JSON.parse(text); }
+        catch {
+          if (++failures <= 2) continue;
+          throw new Error(`Server returned: ${text.slice(0, 140)}`);
+        }
+        if (d.error) throw new Error(d.error);
+        if (d.sync && !d.sync.complete) {
+          if (d.syncError) throw new Error(d.syncError);
+          setProgress({ syncedTo: d.sync.syncedTo, pct: d.sync.progress });
+          continue;
+        }
+        setProgress(null);
+        setData(d);
+        return;
+      }
+      throw new Error("History download didn't finish — press Sync from Dhan to continue where it stopped.");
+    } catch (e: any) {
+      setErr(e?.message || String(e));
+    } finally {
+      setSyncing(false);
+    }
   };
   useEffect(() => { load(); }, []);
 
@@ -547,10 +575,37 @@ export default function PnlPage() {
   const a = useMemo(() => computeAnalytics(filtered), [filtered]);
   const latestTax = useMemo(() => (data ? taxByFy(data.trades)[0] : null), [data]);
 
-  if (!data && !err) {
-    return <div style={{ padding: "40px 0", color: "var(--text-muted)" }}>Loading your trade history… the first load downloads everything from Dhan and can take up to a minute.</div>;
+  if (!data) {
+    return (
+      <div style={{ padding: "32px 0", maxWidth: 560 }}>
+        <h1 className={s.title}>Realized P&amp;L</h1>
+        {err ? (
+          <>
+            <div className={`${s.note} ${s.noteErr}`}><b>Couldn't load P&amp;L.</b> {err}</div>
+            <div style={{ marginTop: 14 }}>
+              <button type="button" className={`${s.btn} ${s.btnGold}`} disabled={syncing} onClick={() => load()}>
+                {syncing ? "Retrying…" : "Retry"}
+              </button>
+            </div>
+          </>
+        ) : (
+          <>
+            <div className={s.sub} style={{ marginTop: 10 }}>
+              {progress
+                ? `Downloading your Dhan trade history — done up to ${dshort(progress.syncedTo)}.`
+                : "Loading your trade history…"}
+            </div>
+            <div className={s.meter} style={{ marginTop: 14, height: 8 }}>
+              <i style={{ width: `${Math.max(3, (progress?.pct ?? 0) * 100)}%`, transition: "width .4s" }} />
+            </div>
+            <div className={s.sub} style={{ marginTop: 10, fontSize: 12 }}>
+              First time only: every trade since 2020 is fetched in steps and saved, so later visits open instantly. You can leave this page — progress is kept.
+            </div>
+          </>
+        )}
+      </div>
+    );
   }
-  if (!data) return <div className={`${s.note} ${s.noteErr}`}>Couldn't load P&amp;L: {err}</div>;
 
   const issues = data.unmatched.length + data.mismatches.length;
   const synced = data.fetchedAt ? new Date(data.fetchedAt).toLocaleString("en-IN", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" }) : "never";
@@ -571,7 +626,8 @@ export default function PnlPage() {
         </div>
       </header>
 
-      {data.syncError && <div className={`${s.note} ${s.noteErr}`}><b>Sync issue.</b> {data.syncError}</div>}
+      {(err || data.syncError) && <div className={`${s.note} ${s.noteErr}`}><b>Sync issue.</b> {err || data.syncError} Showing the last saved trades.</div>}
+      {progress && <div className={s.note}>Syncing… done up to {dshort(progress.syncedTo)}</div>}
 
       <div className={s.tabs} role="tablist" aria-label="P&L views">
         {([["overview", "Overview"], ["trades", `Trades (${filtered.length})`], ["tax", "Tax statement"]] as [Tab, string][]).map(([k, l]) => (
