@@ -727,7 +727,7 @@ export default function DashboardOverview() {
         {goldHoldings.length > 0 && (
           <div className="list-card">
             <div className="list-head">
-              <div className="list-title">Gold Holdings <span className="src-badge" style={{ color: "var(--c-gold)" }}>via IBJA</span></div>
+              <div className="list-title">Gold Holdings <span className="src-badge" style={{ color: "var(--c-gold)" }}>via GoodReturns</span></div>
               <Link href="/dashboard/gold" className="list-link">View all →</Link>
             </div>
             {goldHoldings.slice(0, 5).map((h: any) => (

@@ -194,7 +194,7 @@ function GoldChart({ points }: { points: any[] }) {
 
       {hasBackfillData && (
         <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 10, lineHeight: 1.5 }}>
-          Older history in this range comes from GOLDBEES (an NSE-traded ETF that directly tracks domestic Indian gold prices), converted to 22K equivalent — real Indian market data, not an international-price approximation. Recent data uses IBJA's own published rate directly.
+          Older history in this range comes from GOLDBEES (an NSE-traded ETF that directly tracks domestic Indian gold prices), converted to 22K equivalent — real Indian market data, not an international-price approximation. Recent data uses the published daily rate directly (IBJA until 6 Nov 2026, GoodReturns Bangalore since).
         </div>
       )}
     </div>
@@ -276,19 +276,21 @@ export default function GoldPage() {
   const totalGainPct = totalInvested > 0 ? (totalGain / totalInvested) * 100 : 0;
   const totalWeight = holdings.reduce((s, h) => s + h.weightGrams, 0);
 
-  // Today's Rate must come from a genuine IBJA-sourced row (has ibja_date
-  // set), never from GOLDBEES backfill data — backfill only populates 22K
-  // and is a converted approximation, not IBJA's actual published rate.
+  // Today's Rate must come from a genuinely published row (has ibja_date —
+  // the rate date, whatever the source), never from GOLDBEES backfill data,
+  // which only populates 22K and is a converted approximation.
   const ibjaRows = history.filter((h) => h.ibja_date !== null && h.ibja_date !== undefined);
   const latestRates = ibjaRows.length > 0 ? ibjaRows[ibjaRows.length - 1] : null;
 
   return (
     <div>
       <div style={{ fontFamily: "var(--font-display)", fontSize: 22, fontWeight: 600, marginBottom: 4 }}>
-        Gold <span style={{ fontSize: 11, background: "var(--gold-soft)", color: "var(--gold)", padding: "3px 9px", borderRadius: 100, marginLeft: 8, verticalAlign: "middle" }}>via IBJA</span>
+        Gold <span style={{ fontSize: 11, background: "var(--gold-soft)", color: "var(--gold)", padding: "3px 9px", borderRadius: 100, marginLeft: 8, verticalAlign: "middle" }}>{latestRates?.source === "ibja" ? "via IBJA" : "via GoodReturns"}</span>
       </div>
       <div style={{ color: "var(--text-muted)", fontSize: 13, marginBottom: 20 }}>
-        Rates from IBJA (India Bullion and Jewellers Association) — base bullion value per gram, excluding 3% GST and making charges.
+        {latestRates?.source === "ibja"
+          ? "Rates from IBJA (India Bullion and Jewellers Association), used as a fallback because GoodReturns was unavailable — per gram, excluding 3% GST and making charges."
+          : "Bangalore gold rates from GoodReturns, updated daily — per gram, excluding 3% GST and making charges."}
       </div>
 
       {!loading && holdings.length > 0 && (

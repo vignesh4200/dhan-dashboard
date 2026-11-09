@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getCurrentUser } from "@/lib/session";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
-import { fetchIbjaRates, rateForPurity } from "@/lib/gold-price";
+import { fetchGoldRates, rateForPurity } from "@/lib/gold-price";
 
 export async function POST(req: NextRequest) {
   const user = await getCurrentUser();
@@ -14,7 +14,7 @@ export async function POST(req: NextRequest) {
 
   // Seed the current value immediately with today's rate, so it doesn't
   // show blank until the next daily cron run.
-  const { rates } = await fetchIbjaRates();
+  const { rates } = await fetchGoldRates();
   const rate = rates ? rateForPurity(rates, purity) : null;
 
   const { error } = await supabaseAdmin.from("gold_holdings").insert({

@@ -1,8 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
-import { fetchIbjaRates, rateForPurity } from "@/lib/gold-price";
+import { fetchGoldRates, rateForPurity } from "@/lib/gold-price";
 
-// Run this TWICE A DAY (matching IBJA's AM/PM publish schedule):
+// Runs hourly. Source: GoodReturns Bangalore (primary), IBJA (fallback) — see lib/gold-price.ts.
 //   GET https://your-app.vercel.app/api/cron/gold-refresh?secret=YOUR_CRON_SECRET
 export async function GET(req: NextRequest) {
   const secret = req.nextUrl.searchParams.get("secret");
@@ -10,7 +10,7 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
 
-  const { rates, diag } = await fetchIbjaRates();
+  const { rates, diag } = await fetchGoldRates();
   if (!rates) {
     return NextResponse.json({ ranAt: new Date().toISOString(), ok: false, diag });
   }
@@ -22,6 +22,7 @@ export async function GET(req: NextRequest) {
     rate_18k: rates.rate18k,
     rate_14k: rates.rate14k,
     ibja_date: rates.ibjaDate,
+    source: rates.source,
   });
 
   const { data: holdings } = await supabaseAdmin.from("gold_holdings").select("id, weight_grams, purity");

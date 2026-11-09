@@ -172,13 +172,13 @@ export async function GET(req: NextRequest) {
                 eyebrow: "Gold Alert",
                 accent: "#F0B94F",
                 icon: side === "above" ? "\u{1F4C8}" : "\u{1F4C9}",
-                headline: `IBJA 999 rate has ${verb} your target of ${inrImg(target)}/g`,
+                headline: `24K gold rate has ${verb} your target of ${inrImg(target)}/g`,
                 bigValue: `${inrImg(latestGold.rate_999!)}/g`,
                 bigValueColor: "#F0B94F",
                 rows: latestGold.rate_22k != null ? [{ label: "22 KT", value: `${inrImg(latestGold.rate_22k)}/g` }] : [],
               }),
             caption: `${side === "above" ? "📈" : "📉"} <b>Gold Alert</b> — ${verb} ₹${target.toLocaleString("en-IN")}/g`,
-            fallbackText: `${side === "above" ? "📈" : "📉"} <b>Gold Alert</b>\nIBJA 999 rate has ${verb} your target of ₹${target.toLocaleString("en-IN")}/g — now ₹${latestGold.rate_999.toLocaleString("en-IN")}/g.${latestGold.rate_22k != null ? `\n22 KT: ₹${latestGold.rate_22k.toLocaleString("en-IN")}/g` : ""}`,
+            fallbackText: `${side === "above" ? "📈" : "📉"} <b>Gold Alert</b>\n24K gold rate has ${verb} your target of ₹${target.toLocaleString("en-IN")}/g — now ₹${latestGold.rate_999.toLocaleString("en-IN")}/g.${latestGold.rate_22k != null ? `\n22 KT: ₹${latestGold.rate_22k.toLocaleString("en-IN")}/g` : ""}`,
           });
           goldAlertSent = true;
         }
@@ -260,7 +260,7 @@ export async function GET(req: NextRequest) {
 
         // Daily gold rate — independent of the threshold alert, sent every
         // day regardless of whether the user set a target, so they always
-        // know where IBJA 999 stands.
+        // know where the 24K rate stands.
         if (latestGold?.rate_999 != null) {
           const cutoff = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
           const { data: dayAgoRow } = await supabaseAdmin
@@ -293,14 +293,14 @@ export async function GET(req: NextRequest) {
                 eyebrow: "Gold Rate",
                 accent: "#F0B94F",
                 icon: "\u{1FA99}",
-                headline: "Today's IBJA gold rate",
+                headline: "Today's gold rate (Bangalore)",
                 bigValue: `${inrImg(rate)}/g`,
                 bigValueColor: "#F0B94F",
                 subtext: changeLine,
                 rows: rate22k != null ? [{ label: "22 KT", value: `${inrImg(rate22k)}/g` }] : [],
               }),
-            caption: `🪙 <b>Daily Gold Rate</b> — 999: ₹${rate.toLocaleString("en-IN")}/g${rate22k != null ? ` · 22K: ₹${rate22k.toLocaleString("en-IN")}/g` : ""}`,
-            fallbackText: `🪙 <b>Daily Gold Rate</b>\nIBJA 999: ₹${rate.toLocaleString("en-IN")}/g${changeLineText ? `\n${changeLineText}` : ""}${rate22k != null ? `\n22 KT: ₹${rate22k.toLocaleString("en-IN")}/g` : ""}`,
+            caption: `🪙 <b>Daily Gold Rate</b> — 24K: ₹${rate.toLocaleString("en-IN")}/g${rate22k != null ? ` · 22K: ₹${rate22k.toLocaleString("en-IN")}/g` : ""}`,
+            fallbackText: `🪙 <b>Daily Gold Rate</b>\n24K: ₹${rate.toLocaleString("en-IN")}/g${changeLineText ? `\n${changeLineText}` : ""}${rate22k != null ? `\n22 KT: ₹${rate22k.toLocaleString("en-IN")}/g` : ""}`,
           });
           goldDailySent = true;
         }
