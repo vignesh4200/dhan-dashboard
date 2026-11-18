@@ -1,7 +1,25 @@
 import "./globals.css";
+import type { Metadata, Viewport } from "next";
+import RegisterSW from "./RegisterSW";
 
-export const metadata = {
+export const metadata: Metadata = {
   title: "Portfolio · Dhan Dashboard",
+  applicationName: "Dhan Vault",
+  appleWebApp: { capable: true, title: "Dhan Vault", statusBarStyle: "black" },
+  icons: {
+    icon: [
+      { url: "/icons/favicon-48.png", sizes: "48x48", type: "image/png" },
+      { url: "/icons/icon-192.png", sizes: "192x192", type: "image/png" },
+    ],
+    apple: [{ url: "/icons/apple-touch-icon.png", sizes: "180x180" }],
+  },
+};
+
+// Colours the Android status bar / app window to match the navy theme.
+export const viewport: Viewport = {
+  themeColor: "#0b1220",
+  width: "device-width",
+  initialScale: 1,
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
@@ -14,7 +32,10 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
           rel="stylesheet"
         />
       </head>
-      <body>{children}</body>
+      <body>
+        {children}
+        <RegisterSW />
+      </body>
     </html>
   );
 }
