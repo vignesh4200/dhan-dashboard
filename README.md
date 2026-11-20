@@ -170,3 +170,24 @@ One-time setup:
    URL is built in (override with `DESK_ROUTINE_FIRE_URL` for a different
    routine). Without the token, requests wait in the queue until you click
    Run now on the routine.
+
+## Credit Cards (bills, reminders, interest guard)
+
+`/dashboard/cards` tracks HDFC credit card bills, Debit Card EMI and loan EMIs
+from your **emails only** — no bank login, no SMS access.
+
+1. Supabase → SQL Editor → run `sql/credit_cards.sql` (once).
+2. Vercel → Environment Variables → add `CARD_INGEST_SECRET` (a random hex
+   string, same way as `CRON_SECRET`). Optional: `CARD_PDF_PASSWORDS`
+   (comma-separated) instead of saving the password on the page.
+3. Google Apps Script → paste `scripts/gmail-card-sync.gs`, set the script
+   properties `DHAN_URL` and `INGEST_SECRET`, run `setup` once. It back-fills
+   200 days and then syncs every 15 minutes, and emails you the reminders.
+4. On the Credit Cards page → Setup: save the statement PDF password, your
+   monthly spend cap, and card limits / EMI amounts.
+
+Reminders: T-7 (with a check against the last account balance seen in your
+HDFC alerts), T-3, T-1, due day, then daily while overdue — 8am–10pm IST, by
+email and (if already configured) Telegram. A payment smaller than the total
+due triggers an immediate alert, because a part payment makes the whole bill
+attract interest from each purchase date.
