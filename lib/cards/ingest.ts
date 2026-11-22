@@ -71,9 +71,11 @@ async function ingestStatement(m: IncomingMessage): Promise<IngestResult> {
 
   let parsed: ReturnType<typeof parseStatementLines> | null = null;
   let note = "";
+  let pdfLines: string[] = [];
   if (pdf) {
     try {
       const lines = await pdfToLines(Buffer.from(pdf.data, "base64"), await pdfPasswords());
+      pdfLines = lines;
       parsed = parseStatementLines(lines);
       note = parsed.note;
     } catch (e: any) {
@@ -110,6 +112,9 @@ async function ingestStatement(m: IncomingMessage): Promise<IngestResult> {
     credit_limit: parsed?.creditLimit ?? null,
     parsed_ok: !!parsed?.ok,
     parse_note: note,
+    // TEMPORARY: keep the extracted text of statements we could not parse,
+    // so the parser can be fitted to HDFC's layout. Cleared once fixed.
+    debug_lines: parsed && !parsed.ok ? pdfLines.slice(0, 160).join("\n") : null,
   };
   const { error } = await supabaseAdmin.from("cc_statements").upsert(row, { onConflict: "external_id" });
   if (error) return { id: m.id, status: "error", detail: error.message };
