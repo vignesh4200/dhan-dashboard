@@ -73,17 +73,67 @@ function find(text: string, re: RegExp): string | null {
   return r ? r[1] : null;
 }
 
+// HDFC's current layout (2026) prints the account summary as a formula, with
+// the rupee sign extracted as "C":
+//   C 59,739.54 C 66,038.45 + C 6,298.91 + C 0.00 = C 0.00
+//   previous dues − payments + purchases + finance charges = total due
+// and puts "MINIMUM DUE  DUE DATE" values on a row of their own, e.g.
+//   C 2,990.00 05 Jun, 2026      or      C 0.00 Nil   (nothing due)
+const CUR = String.raw`(?:C|₹|Rs\.?|INR|\x60)\s?`;
+const DUE_ROW = new RegExp(String.raw`^` + CUR + String.raw`([\d,]+(?:\.\d{2})?)\s+(Nil|` + DATE.slice(1, -1) + String.raw`)$`, "i");
+
+export function parseHdfcSummary(lines: string[]) {
+  const flat = lines.join(" ");
+  const f = new RegExp(
+    CUR + String.raw`([\d,]+\.\d{2})\s+` + CUR + String.raw`([\d,]+\.\d{2})\s*\+\s*` + CUR + String.raw`([\d,]+\.\d{2})\s*\+\s*` + CUR + String.raw`([\d,]+\.\d{2})\s*=`
+  ).exec(flat);
+  if (!f) return null;
+  const [prev, paid, spent, fin] = f.slice(1, 5).map((x) => toAmount(x) || 0);
+  const balance = Math.round((prev - paid + spent + fin) * 100) / 100;
+
+  let dueRaw: string | null = null;
+  let minDue: number | null = null;
+  for (let i = 0; i < lines.length; i++) {
+    const r = DUE_ROW.exec(lines[i].trim());
+    if (!r) continue;
+    dueRaw = r[2];
+    // The amount is the minimum due on card statements; on EMI statements the
+    // same row carries the loan amount instead.
+    if (lines.slice(Math.max(0, i - 4), i).some((l) => /MINIMUM DUE/i.test(l))) minDue = toAmount(r[1]);
+    break;
+  }
+
+  let creditLimit: number | null = null;
+  const li = lines.findIndex((l) => /TOTAL CREDIT LIMIT/i.test(l));
+  if (li >= 0) {
+    for (const l of lines.slice(li, li + 6)) {
+      const r = new RegExp(String.raw`^` + CUR + String.raw`([\d,]+(?:\.\d{2})?)\s+` + CUR + String.raw`[\d,]+(?:\.\d{2})?\s+` + CUR + String.raw`[\d,]+(?:\.\d{2})?$`).exec(l.trim());
+      if (r) { creditLimit = toAmount(r[1]); break; }
+    }
+  }
+
+  return {
+    totalDue: Math.max(0, balance), // a credit balance means nothing is due
+    financeCharges: fin,
+    minDue,
+    dueDate: dueRaw && !/^nil$/i.test(dueRaw) ? iso(dueRaw) : null,
+    nothingDue: balance <= 0 || (dueRaw != null && /^nil$/i.test(dueRaw)),
+    creditLimit,
+  };
+}
+
 export function parseStatementLines(lines: string[]): ParsedStatement {
   const text = lines.join("\n");
   const flat = lines.join(" ");
+  const hdfc = parseHdfcSummary(lines);
 
-  let dueDate = iso(find(flat, new RegExp(String.raw`(?:Payment )?Due Date\s*:?\s*` + DATE, "i")));
-  let totalDue = toAmount(find(flat, new RegExp(String.raw`Total (?:Amount )?Dues?\s*:?\s*` + AMT, "i")));
-  let minDue = toAmount(find(flat, new RegExp(String.raw`Minimum (?:Amount )?Due\s*:?\s*` + AMT, "i")));
+  let dueDate = hdfc ? hdfc.dueDate : iso(find(flat, new RegExp(String.raw`(?:Payment )?Due Date\s*:?\s*` + DATE, "i")));
+  let totalDue = hdfc ? hdfc.totalDue : toAmount(find(flat, new RegExp(String.raw`Total (?:Amount )?Dues?\s*:?\s*` + AMT, "i")));
+  let minDue = hdfc ? hdfc.minDue : toAmount(find(flat, new RegExp(String.raw`Minimum (?:Amount )?Due\s*:?\s*` + AMT, "i")));
   const statementDate = iso(find(flat, new RegExp(String.raw`Statement Date\s*:?\s*` + DATE, "i")));
 
   // Older layout: a header row of labels, the values on the next line.
-  if (!dueDate || totalDue == null || minDue == null) {
+  if (!hdfc && (!dueDate || totalDue == null || minDue == null)) {
     for (let i = 0; i < lines.length - 1; i++) {
       if (/Due Date/i.test(lines[i]) && /Total/i.test(lines[i]) && /Minimum/i.test(lines[i])) {
         const nx = lines[i + 1];
@@ -102,14 +152,14 @@ export function parseStatementLines(lines: string[]): ParsedStatement {
     }
   }
 
-  const financeCharges = (() => {
+  const financeCharges = hdfc ? hdfc.financeCharges : (() => {
     const all = [...text.matchAll(/Finance Charges?[^\d\n]{0,20}([\d,]+\.\d{2})/gi)].map((m) => toAmount(m[1]) || 0);
     return all.length ? Math.max(...all) : null;
   })();
-  const creditLimit = toAmount(find(flat, new RegExp(String.raw`Credit Limit\s*:?\s*` + AMT_INT, "i")));
+  const creditLimit = hdfc?.creditLimit ?? toAmount(find(flat, new RegExp(String.raw`Credit Limit\s*:?\s*` + AMT_INT, "i")));
   const last4 = find(flat, /(?:\d{4}|X{4})[X\d ]{4,12}?(\d{4})\b/);
 
-  const ok = !!dueDate && totalDue != null;
+  const ok = (!!dueDate && totalDue != null) || (!!hdfc?.nothingDue && totalDue != null);
   return {
     last4,
     statementDate,
@@ -119,6 +169,6 @@ export function parseStatementLines(lines: string[]): ParsedStatement {
     financeCharges,
     creditLimit,
     ok,
-    note: ok ? "parsed" : "Could not find due date / total due in the PDF — add them by hand on the Credit Cards page",
+    note: ok ? (dueDate ? "parsed" : "parsed — nothing due this cycle") : "Could not find due date / total due in the PDF — add them by hand on the Credit Cards page",
   };
 }
