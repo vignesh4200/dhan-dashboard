@@ -73,7 +73,7 @@ export function parseHdfcAlert(rawText: string, receivedAt: string): ParsedTxn |
   let r: RegExpExecArray | null;
 
   // Credit card purchase.
-  r = /Rs\.?\s?([\d,]+(?:\.\d+)?) is debited from your HDFC Bank Credit Card ending (\d{4}) towards (.+?) on (\d{1,2} [A-Za-z]{3},? \d{4})(?: at (\d{2}):(\d{2}):(\d{2}))?/i.exec(t);
+  r = /Rs\.?\s?([\d,]+(?:\.\d+)?) (?:has been |is )debited from your HDFC Bank Credit Card ending (\d{4}) towards (.+?) on (\d{1,2} [A-Za-z]{3},? \d{4})(?: at (\d{2}):(\d{2}):(\d{2}))?/i.exec(t);
   if (r) {
     const d = parseDayMonYear(r[4]);
     const merchant = r[3].trim();
