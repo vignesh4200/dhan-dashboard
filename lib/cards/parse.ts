@@ -69,7 +69,13 @@ export function htmlToText(html: string): string {
 const CARD_PAYEE = /\bcred\b|credit ?card|hdfc ?cc|ccpay|card ?bill|cc ?bill|billdesk.*card/i;
 
 export function parseHdfcAlert(rawText: string, receivedAt: string): ParsedTxn | null {
-  const t = rawText.replace(/\s+/g, " ");
+  // Apps Script's getPlainBody() renders <b>bold</b> as *bold*, which newer
+  // HDFC alerts use around the amount, card, merchant and date. Drop the
+  // asterisks at word edges but keep ones inside names like "PYU*Swiggy".
+  const t = rawText
+    .replace(/\s+/g, " ")
+    .replace(/(^|[\s(])\*+(?=\S)/g, "$1")
+    .replace(/(\S)\*+(?=[\s.,;:)]|$)/g, "$1");
   let r: RegExpExecArray | null;
 
   // Credit card purchase.
