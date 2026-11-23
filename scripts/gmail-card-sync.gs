@@ -1,8 +1,9 @@
 /**
- * Dhan Vault — Credit Cards Gmail sync (Google Apps Script)
+ * Dhan Vault — Credit (cards + loans) Gmail sync (Google Apps Script)
  *
  * Runs inside YOUR Gmail account (script.google.com), every 15 minutes:
- *   1. finds new emails from HDFC (alerts + card/EMI statements),
+ *   1. finds new emails from HDFC (alerts + card/EMI statements), DSP Finance
+ *      (loan-against-MF dues) and Groww (loan EMI reminders),
  *   2. posts them to the dashboard's /api/cards/ingest (statement PDFs included,
  *      the dashboard unlocks them with the password you saved on the page),
  *   3. asks /api/cards/reminders for any due-date reminders,
@@ -18,7 +19,9 @@
  *      It back-fills the last 200 days, then installs the 15-minute trigger.
  */
 
-var SENDERS = 'from:(alerts@hdfcbank.bank.in OR emailstatements.cards@hdfcbank.bank.in)';
+// HDFC card/account alerts and statements, plus lenders that only announce
+// dues by email: DSP Finance (loan against MF) and Groww loan EMI reminders.
+var SENDERS = '{from:(alerts@hdfcbank.bank.in OR emailstatements.cards@hdfcbank.bank.in OR no-reply@dspfin.com) (from:noreply@groww.in subject:EMI)}';
 
 function props_() { return PropertiesService.getScriptProperties(); }
 function cfg_() {
@@ -52,7 +55,7 @@ function sync_(backfill) {
     while (true) {
       // The back-fill skips everyday savings-account alerts to stay inside
       // Apps Script's 6-minute limit; regular runs take everything.
-      var q = SENDERS + ' after:' + after + (backfill ? ' ("Credit Card" OR statement OR "Debit Card" OR mandate)' : '');
+      var q = SENDERS + ' after:' + after + (backfill ? ' ("Credit Card" OR statement OR "Debit Card" OR mandate OR "amount due" OR EMI)' : '');
       var threads = GmailApp.search(q, start, 100);
       if (!threads.length) break;
       threads.forEach(function (th) {

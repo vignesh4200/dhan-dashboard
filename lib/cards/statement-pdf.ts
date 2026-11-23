@@ -16,6 +16,8 @@ export type ParsedStatement = {
   minDue: number | null;
   financeCharges: number | null;
   creditLimit: number | null;
+  prevDues: number | null;
+  paymentsReceived: number | null;
   ok: boolean;
   note: string;
 };
@@ -113,6 +115,8 @@ export function parseHdfcSummary(lines: string[]) {
   }
 
   return {
+    prevDues: prev,
+    paymentsReceived: paid,
     totalDue: Math.max(0, balance), // a credit balance means nothing is due
     financeCharges: fin,
     minDue,
@@ -168,6 +172,8 @@ export function parseStatementLines(lines: string[]): ParsedStatement {
     minDue,
     financeCharges,
     creditLimit,
+    prevDues: hdfc?.prevDues ?? null,
+    paymentsReceived: hdfc?.paymentsReceived ?? null,
     ok,
     note: ok ? (dueDate ? "parsed" : "parsed — nothing due this cycle") : "Could not find due date / total due in the PDF — add them by hand on the Credit Cards page",
   };

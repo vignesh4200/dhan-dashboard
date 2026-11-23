@@ -86,3 +86,18 @@ alter table cc_statements enable row level security;
 alter table cc_payments enable row level security;
 alter table cc_reminder_log enable row level security;
 alter table cc_settings enable row level security;
+
+-- Loans & EMIs on the Credit page (Nov 2026). Safe to re-run.
+alter table cc_cards
+  add column if not exists principal numeric,
+  add column if not exists annual_rate numeric,
+  add column if not exists tenure_months int,
+  add column if not exists first_emi_date date,
+  add column if not exists last_emi_date date,
+  add column if not exists interest_only boolean not null default false,
+  add column if not exists track_from date,          -- dues before this date are history
+  add column if not exists note text;
+-- status: active | closed | check (confirm it is still running) | pending
+alter table cc_statements
+  add column if not exists prev_dues numeric,
+  add column if not exists payments_received numeric;
