@@ -50,6 +50,8 @@ export async function POST(req: NextRequest) {
 export async function GET(req: NextRequest) {
   if (!authorized(req)) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   if (req.nextUrl.searchParams.get("need") === "statements") {
+    // Called on every run, so it also marks "synced" when no new mail came in.
+    await supabaseAdmin.from("cc_settings").update({ last_sync_at: new Date().toISOString() }).eq("id", 1);
     const since = new Date(Date.now() - 200 * 86_400_000).toISOString();
     const { data } = await supabaseAdmin.from("cc_statements").select("external_id").eq("parsed_ok", false).gte("created_at", since).not("external_id", "like", "manual:%").limit(20);
     return NextResponse.json({ ids: (data || []).map((r: any) => r.external_id) });
