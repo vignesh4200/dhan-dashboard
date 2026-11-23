@@ -324,7 +324,13 @@ export default function CardsPage() {
 // Month calendar of every due: card bills and loan EMIs from the API, plus
 // future EMIs projected from each loan's schedule so later months fill in too.
 function DueCalendar({ bills, loans, today }: { bills: any[]; loans: any[]; today: string }) {
-  const [offset, setOffset] = useState(0);
+  // Open on the month of the next open bill (e.g. December when November has
+  // nothing left to pay); "Today" goes back to the current month.
+  const [offset, setOffset] = useState(() => {
+    const next = bills.filter((b) => b.left > 1).map((b) => b.dueDate).sort()[0];
+    if (!next) return 0;
+    return Math.max(0, (Number(next.slice(0, 4)) - Number(today.slice(0, 4))) * 12 + Number(next.slice(5, 7)) - Number(today.slice(5, 7)));
+  });
   const base = new Date(today + "T00:00:00Z");
   const first = new Date(Date.UTC(base.getUTCFullYear(), base.getUTCMonth() + offset, 1));
   const y = first.getUTCFullYear(), m = first.getUTCMonth();
