@@ -171,10 +171,14 @@ One-time setup:
    routine). Without the token, requests wait in the queue until you click
    Run now on the routine.
 
-## Credit Cards (bills, reminders, interest guard)
+## Credit (cards, EMIs & loans: bills, reminders, interest guard)
 
-`/dashboard/cards` tracks HDFC credit card bills, Debit Card EMI and loan EMIs
-from your **emails only** — no bank login, no SMS access.
+`/dashboard/cards` (the **Credit** page) tracks HDFC credit card bills, Debit
+Card EMI and loans from your **emails only** — no bank login, no SMS access.
+Loans: set the terms under Setup (amount, rate, tenure, first/last EMI). DSP
+Finance dues and Groww EMI reminders are read from email; loans that never
+email a debit (e.g. HDFC Personal Loan) need a "Mark paid" tick each month and
+are reminded daily after the due date until ticked.
 
 1. Supabase → SQL Editor → run `sql/credit_cards.sql` (once).
 2. Vercel → Environment Variables → add `CARD_INGEST_SECRET` (a random hex

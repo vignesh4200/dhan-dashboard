@@ -4,7 +4,7 @@ import { getCurrentUser } from "@/lib/session";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import { encryptSecret } from "@/lib/crypto";
 import { isTelegramConfigured } from "@/lib/telegram";
-import { buildBills, closedCardMandates, cycleSpend, currentCycle, lastBankBalance, loadAll, todayIst } from "@/lib/cards/summary";
+import { buildBills, buildLoans, closedCardMandates, cycleSpend, currentCycle, lastBankBalance, loadAll, todayIst } from "@/lib/cards/summary";
 
 export const dynamic = "force-dynamic";
 
@@ -16,6 +16,7 @@ export async function GET() {
   const today = todayIst();
   const bills = buildBills(d, today);
   const cycle = currentCycle(d, today);
+  const loans = buildLoans(d, bills, today);
 
   // Interest & fees in the last 12 months, from parsed statements.
   const yearAgo = new Date(Date.now() - 365 * 86_400_000).toISOString().slice(0, 10);
@@ -51,6 +52,7 @@ export async function GET() {
     today,
     cards: d.cards,
     bills,
+    loans,
     nextCard,
     guardTxns,
     cycle,
@@ -105,8 +107,18 @@ export async function POST(req: NextRequest) {
         credit_limit: num(b.credit_limit), monthly_rate: num(b.monthly_rate) ?? 3.75, emi_amount: num(b.emi_amount),
         emi_due_day: num(b.emi_due_day), annual_fee: num(b.annual_fee), fee_waiver_spend: num(b.fee_waiver_spend),
         card_year_start: b.card_year_start || null,
+        principal: num(b.principal), annual_rate: num(b.annual_rate), tenure_months: num(b.tenure_months),
+        first_emi_date: b.first_emi_date || null, last_emi_date: b.last_emi_date || null,
+        interest_only: b.interest_only === true || b.interest_only === "true",
+        track_from: b.track_from || new Date().toISOString().slice(0, 10), note: b.note || null,
       };
       const { error } = await supabaseAdmin.from("cc_cards").upsert(row, { onConflict: "last4" });
+      if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+      break;
+    }
+    case "setStatus": {
+      if (!b.last4 || !["active", "closed", "check", "pending"].includes(b.status)) return NextResponse.json({ error: "bad status" }, { status: 400 });
+      const { error } = await supabaseAdmin.from("cc_cards").update({ status: b.status }).eq("last4", b.last4);
       if (error) return NextResponse.json({ error: error.message }, { status: 500 });
       break;
     }

@@ -52,7 +52,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
     { href: "/dashboard/mutual-funds", label: "Mutual Funds" },
     { href: "/dashboard/gold", label: "Gold" },
     { href: "/dashboard/dividends", label: "Dividends" },
-    { href: "/dashboard/cards", label: "Credit Cards" },
+    { href: "/dashboard/cards", label: "Credit" },
     { href: "/dashboard/signals", label: "Smart Signals" },
     { href: "/dashboard/analyst-desk", label: "Analyst Desk" },
     { href: "/dashboard/pnl", label: "Realized P&L" },

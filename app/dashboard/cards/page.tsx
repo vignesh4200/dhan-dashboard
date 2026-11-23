@@ -78,13 +78,18 @@ export default function CardsPage() {
   const cats = Object.entries(d.cycle.byCat as Record<string, number>).filter(([, v]) => v > 0).sort((a, b) => b[1] - a[1]).slice(0, 6);
   const catMax = cats[0]?.[1] || 1;
   const nothingYet = !d.bills.length && !d.txns.length;
+  const loans: any[] = d.loans || [];
+  const liveLoans = loans.filter((l) => l.status === "active");
+  const loanOut = liveLoans.reduce((s, l) => s + (l.outstanding || 0), 0);
+  const emiLoad = liveLoans.reduce((s, l) => s + (l.emi || 0), 0);
+  const toCheck = loans.filter((l) => l.status === "check" || l.status === "pending");
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 24 }}>
       <div className="dash-header">
         <div>
-          <div className="eyebrow">Spending &amp; dues</div>
-          <h1 className="dash-title">Credit Cards</h1>
+          <div className="eyebrow">Cards, EMIs &amp; loans</div>
+          <h1 className="dash-title">Credit</h1>
         </div>
         <div className="dash-actions">
           <span style={{ fontSize: 12.5, color: "var(--text-muted)" }}>Gmail synced {ago(d.lastSyncAt)}</span>
@@ -98,7 +103,7 @@ export default function CardsPage() {
         <div className="list-card" style={{ display: "flex", flexDirection: "column", gap: 8 }}>
           <div className="list-title">Waiting for the first Gmail sync</div>
           <div style={{ fontSize: 13, color: "var(--text-muted)", lineHeight: 1.6 }}>
-            Card data arrives from your HDFC alert and statement emails through the Gmail Apps Script (scripts/gmail-card-sync.gs in the repo).
+            Card and loan data arrives from your HDFC, DSP and Groww emails through the Gmail Apps Script (scripts/gmail-card-sync.gs in the repo).
             Once it has run, bills, transactions and reminders show up here. Set the statement PDF password under Setup below so due dates can be read.
           </div>
         </div>
@@ -129,9 +134,14 @@ export default function CardsPage() {
             </>
           ) : <div className="vault-sub">Add a credit limit under Setup</div>}
         </div>
+        <div className="vault-card">
+          <div className="vault-label">Loans outstanding</div>
+          <div className="vault-mid">{loanOut > 0 ? inr(loanOut) : "—"}</div>
+          <div className="vault-sub">{loanOut > 0 ? `EMIs ${inr(emiLoad)}/month · from loan terms` : "Add loan terms under Setup"}</div>
+        </div>
       </div>
 
-      <div className="section-label" style={{ margin: "4px 0 -10px" }}>Upcoming payments</div>
+      <div className="section-label" style={{ margin: "4px 0 -10px" }}>Everything due · cards &amp; loans</div>
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(min(280px, 100%), 1fr))", gap: 18 }}>
         {d.bills.length === 0 && <div className="raised" style={{ fontSize: 13, color: "var(--text-muted)" }}>No bills yet.</div>}
         {d.bills.map((b: any) => {
@@ -149,7 +159,7 @@ export default function CardsPage() {
                   <b style={{ width: 10, height: 10, display: "block", background: DOT[b.kind] || "var(--gold)", flex: "none" }} />
                   <div style={{ minWidth: 0 }}>
                     <div style={{ fontSize: 14, fontWeight: 600 }}>{b.name}</div>
-                    <div style={{ fontSize: 12, color: "var(--text-muted)", marginTop: 2 }}>{b.kind === "card" ? `••${b.last4} · statement ${fmtDate(b.statementDate)}` : "Auto-debit"}</div>
+                    <div style={{ fontSize: 12, color: "var(--text-muted)", marginTop: 2 }}>{b.kind === "card" ? `••${b.last4} · statement ${fmtDate(b.statementDate)}` : b.statementId ? "Auto-debit · amount from statement" : "Loan EMI · tick when paid"}</div>
                   </div>
                 </div>
                 <span style={chip(fg, bg)}>{label}</span>
@@ -178,6 +188,8 @@ export default function CardsPage() {
           );
         })}
       </div>
+
+      <Loans loans={liveLoans} toCheck={toCheck} post={post} busy={busy} />
 
       <div className="list-card" style={{ display: "flex", flexDirection: "column", gap: 18 }}>
         <div className="list-head" style={{ marginBottom: 0, flexWrap: "wrap" }}>
@@ -307,6 +319,94 @@ export default function CardsPage() {
   );
 }
 
+function Loans({ loans, toCheck, post, busy }: { loans: any[]; toCheck: any[]; post: (b: any) => Promise<boolean>; busy: boolean }) {
+  const [paying, setPaying] = useState<string | null>(null);
+  const [amt, setAmt] = useState("");
+  const [date, setDate] = useState(new Date().toISOString().slice(0, 10));
+  if (!loans.length && !toCheck.length) return null;
+  const terms = (l: any) => [
+    l.principal ? inr(l.principal) : null,
+    l.annualRate ? `${l.annualRate}%` : l.kind === "emi" && !l.interestOnly && l.emi ? "no interest" : null,
+    l.interestOnly ? "interest only" : l.emisTotal ? `${l.emisTotal} EMIs` : null,
+    l.lastEmi ? `ends ${new Date(l.lastEmi + "T00:00:00Z").toLocaleDateString("en-IN", { month: "short", year: "numeric", timeZone: "UTC" })}` : null,
+  ].filter(Boolean).join(" · ");
+  return (
+    <>
+      <div className="section-label" style={{ margin: "4px 0 -10px" }}>Loans &amp; EMIs</div>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(min(300px, 100%), 1fr))", gap: 18 }}>
+        {loans.map((l) => {
+          const b = l.next;
+          const pct = l.emisTotal && l.emisDone != null ? Math.round((l.emisDone / l.emisTotal) * 100) : null;
+          const paid = b && b.left <= 1;
+          return (
+            <div key={l.key} className="raised" style={{ padding: 18, display: "flex", flexDirection: "column", gap: 12 }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 8 }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 9, minWidth: 0 }}>
+                  <b style={{ width: 10, height: 10, display: "block", background: l.interestOnly ? "var(--c-stocks)" : "var(--c-mf)", flex: "none" }} />
+                  <div style={{ minWidth: 0 }}>
+                    <div style={{ fontSize: 14, fontWeight: 600 }}>{l.name}</div>
+                    <div style={{ fontSize: 12, color: "var(--text-muted)", marginTop: 2 }}>{terms(l) || (l.note ?? "")}</div>
+                  </div>
+                </div>
+                <span style={chip(l.interestOnly ? "var(--c-stocks)" : "var(--c-mf)", l.interestOnly ? "rgba(122,162,255,0.14)" : "var(--amber-soft)")}>{l.interestOnly ? "Interest" : "EMI"}</span>
+              </div>
+              {pct != null && (
+                <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
+                  <div style={{ height: 6, background: "var(--surface-inset)", borderRadius: 999, overflow: "hidden" }}><div style={{ height: 6, width: `${Math.max(2, pct)}%`, background: "var(--gold)" }} /></div>
+                  <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11.5, color: "var(--text-muted)", gap: 8, flexWrap: "wrap" }}>
+                    <span>{l.emisDone} of {l.emisTotal} EMIs done</span>
+                    {l.outstanding != null && <span>{inr(l.outstanding)} left{l.outstandingIsEstimate ? " (est.)" : ""}</span>}
+                  </div>
+                </div>
+              )}
+              {l.note && pct != null && <div style={{ fontSize: 11.5, color: "var(--text-muted)" }}>{l.note}</div>}
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, flexWrap: "wrap", borderTop: "1px solid var(--border)", paddingTop: 12 }}>
+                <div>
+                  <div style={{ fontSize: 12, color: "var(--text-muted)" }}>{b ? `${paid ? "Paid" : "Next"} · ${fmtDate(b.dueDate)}` : "Next"}</div>
+                  <div style={{ fontSize: 18, fontWeight: 700, marginTop: 2, color: b && b.status === "overdue" ? "var(--loss)" : paid ? "var(--gain)" : "var(--text)" }}>
+                    {b ? inr(paid ? b.totalDue : b.left) : l.interestOnly ? <span style={{ fontSize: 14, fontWeight: 500, color: "var(--text-muted)" }}>Awaiting statement email</span> : l.emi ? inr(l.emi) : <span style={{ fontSize: 14, fontWeight: 500, color: "var(--text-muted)" }}>From next statement</span>}
+                  </div>
+                </div>
+                {b && !paid && (paying === l.key ? (
+                  <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "flex-end" }}>
+                    <label style={{ flex: "1 1 100px" }}><span className="field-label">Amount</span><input style={input} inputMode="decimal" value={amt} onChange={(e) => setAmt(e.target.value)} /></label>
+                    <label style={{ flex: "1 1 130px" }}><span className="field-label">Date</span><input style={input} type="date" value={date} onChange={(e) => setDate(e.target.value)} /></label>
+                    <button className="pill-btn" disabled={busy} onClick={async () => { if (await post({ action: "markPaid", last4: l.key, amount: amt, date })) setPaying(null); }}>Save</button>
+                    <button className="btn btn-ghost btn-sm" onClick={() => setPaying(null)}>Cancel</button>
+                  </div>
+                ) : (
+                  <button className="pill-btn" disabled={busy} onClick={() => { setPaying(l.key); setAmt(String(Math.round(b.left * 100) / 100)); setDate(new Date().toISOString().slice(0, 10)); }}>Mark {fmtDate(b.dueDate)} paid</button>
+                ))}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+      {toCheck.map((l) => (
+        <div key={l.key} className="raised" style={{ display: "flex", flexWrap: "wrap", justifyContent: "space-between", alignItems: "center", gap: 12, padding: "14px 18px" }}>
+          <div style={{ minWidth: 0, flex: "1 1 300px" }}>
+            <div style={{ fontWeight: 600, fontSize: 14 }}>{l.name}{l.emi ? ` · ${inr(l.emi)}${l.dueDay ? ` on the ${l.dueDay}${["th", "st", "nd", "rd"][l.dueDay % 10 > 3 || [11, 12, 13].includes(l.dueDay) ? 0 : l.dueDay % 10]}` : ""}` : ""}</div>
+            <div style={{ fontSize: 12.5, color: "var(--text-muted)", marginTop: 2 }}>{l.note || (l.status === "pending" ? "Not started yet" : "Still running?")}</div>
+          </div>
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+            {l.status === "check" ? (
+              <>
+                <button className="btn btn-ghost btn-sm" style={{ minHeight: 40 }} disabled={busy} onClick={() => post({ action: "setStatus", last4: l.key, status: "active" })}>Still running</button>
+                <button className="pill-btn" disabled={busy} onClick={() => post({ action: "setStatus", last4: l.key, status: "closed" })}>Closed</button>
+              </>
+            ) : (
+              <>
+                <button className="btn btn-ghost btn-sm" style={{ minHeight: 40 }} disabled={busy} onClick={() => post({ action: "setStatus", last4: l.key, status: "closed" })}>Didn&apos;t take it</button>
+                <span style={chip("var(--text-muted)", "rgba(163,173,194,0.12)")}>Pending</span>
+              </>
+            )}
+          </div>
+        </div>
+      ))}
+    </>
+  );
+}
+
 function L({ label, children }: { label: string; children: React.ReactNode }) {
   return <label style={{ display: "flex", flexDirection: "column", gap: 4, minWidth: 0 }}><span className="field-label" style={{ marginBottom: 0 }}>{label}</span>{children}</label>;
 }
@@ -314,7 +414,7 @@ function L({ label, children }: { label: string; children: React.ReactNode }) {
 function Setup({ d, post, busy }: { d: any; post: (b: any) => Promise<boolean>; busy: boolean }) {
   const [pw, setPw] = useState("");
   const [cap, setCap] = useState(d.spendCap ? String(d.spendCap) : "");
-  const blank = { last4: "", name: "", kind: "card", status: "active", credit_limit: "", monthly_rate: "3.75", emi_amount: "", emi_due_day: "", annual_fee: "", fee_waiver_spend: "", card_year_start: "" };
+  const blank = { last4: "", name: "", kind: "card", status: "active", credit_limit: "", monthly_rate: "3.75", emi_amount: "", emi_due_day: "", annual_fee: "", fee_waiver_spend: "", card_year_start: "", principal: "", annual_rate: "", tenure_months: "", first_emi_date: "", last_emi_date: "", interest_only: "false", track_from: "", note: "" };
   const [card, setCard] = useState<any>(blank);
   const [st, setSt] = useState<any>({ last4: "", statementDate: "", dueDate: "", totalDue: "", minDue: "" });
   const f = (k: string, v: string) => setCard((c: any) => ({ ...c, [k]: v }));
@@ -343,6 +443,7 @@ function Setup({ d, post, busy }: { d: any; post: (b: any) => Promise<boolean>; 
 
         <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
           <div className="insight-k">Cards, EMIs &amp; loans</div>
+          <div className="insight-d">Loans that don&apos;t email a debit (e.g. HDFC Personal Loan) need a tick each month; reminders continue daily after the due date until you do.</div>
           {d.cards.map((c: any) => (
             <div className="row-line" key={c.last4}>
               <div style={{ minWidth: 0 }}><div style={{ fontWeight: 600 }}>{c.name} <span className="sub">{c.kind === "card" ? `••${c.last4}` : c.kind}</span></div>
@@ -351,10 +452,10 @@ function Setup({ d, post, busy }: { d: any; post: (b: any) => Promise<boolean>; 
             </div>
           ))}
           <div style={grid}>
-            <L label="Last 4 digits (or EMI-DC / LOAN-PL)"><input style={input} value={card.last4} onChange={(e) => f("last4", e.target.value)} /></L>
+            <L label="Last 4 digits, or a short code for a loan"><input style={input} value={card.last4} onChange={(e) => f("last4", e.target.value)} /></L>
             <L label="Name"><input style={input} value={card.name} onChange={(e) => f("name", e.target.value)} placeholder="HDFC Swiggy" /></L>
             <L label="Type"><select style={input} value={card.kind} onChange={(e) => f("kind", e.target.value)}><option value="card">Credit card</option><option value="emi">EMI</option><option value="loan">Loan</option></select></L>
-            <L label="Status"><select style={input} value={card.status} onChange={(e) => f("status", e.target.value)}><option value="active">Active</option><option value="closed">Closed</option></select></L>
+            <L label="Status"><select style={input} value={card.status} onChange={(e) => f("status", e.target.value)}><option value="active">Active</option><option value="closed">Closed</option><option value="check">Needs a check</option><option value="pending">Pending</option></select></L>
             <L label="Credit limit"><input style={input} inputMode="decimal" value={card.credit_limit} onChange={(e) => f("credit_limit", e.target.value)} /></L>
             <L label="Interest % / month"><input style={input} inputMode="decimal" value={card.monthly_rate} onChange={(e) => f("monthly_rate", e.target.value)} /></L>
             <L label="EMI amount (EMI / loan)"><input style={input} inputMode="decimal" value={card.emi_amount} onChange={(e) => f("emi_amount", e.target.value)} /></L>
@@ -363,6 +464,17 @@ function Setup({ d, post, busy }: { d: any; post: (b: any) => Promise<boolean>; 
             <L label="Fee waived above spend of"><input style={input} inputMode="decimal" value={card.fee_waiver_spend} onChange={(e) => f("fee_waiver_spend", e.target.value)} /></L>
             <L label="Card year starts"><input style={input} type="date" value={card.card_year_start} onChange={(e) => f("card_year_start", e.target.value)} /></L>
           </div>
+          {card.kind !== "card" && (
+            <div style={grid}>
+              <L label="Loan amount"><input style={input} inputMode="decimal" value={card.principal} onChange={(e) => f("principal", e.target.value)} /></L>
+              <L label="Interest % / year"><input style={input} inputMode="decimal" value={card.annual_rate} onChange={(e) => f("annual_rate", e.target.value)} /></L>
+              <L label="Tenure (months)"><input style={input} inputMode="numeric" value={card.tenure_months} onChange={(e) => f("tenure_months", e.target.value)} /></L>
+              <L label="First EMI"><input style={input} type="date" value={card.first_emi_date} onChange={(e) => f("first_emi_date", e.target.value)} /></L>
+              <L label="Last EMI"><input style={input} type="date" value={card.last_emi_date} onChange={(e) => f("last_emi_date", e.target.value)} /></L>
+              <L label="Repayment"><select style={input} value={card.interest_only} onChange={(e) => f("interest_only", e.target.value)}><option value="false">EMI</option><option value="true">Interest only</option></select></L>
+              <L label="Note"><input style={input} value={card.note} onChange={(e) => f("note", e.target.value)} /></L>
+            </div>
+          )}
           <div style={{ display: "flex", gap: 8 }}>
             <button className="pill-btn" disabled={busy} onClick={async () => { if (await post({ action: "saveCard", ...card })) setCard(blank); }}>Save card</button>
             <button className="btn btn-ghost btn-sm" onClick={() => setCard(blank)}>Clear</button>

@@ -1,4 +1,4 @@
-// Builds the Credit Cards picture from the cc_* tables: open bills, what's
+// Builds the Credit picture (cards, EMIs and loans) from the cc_* tables: open bills, what's
 // still owed, interest risk, spend vs cap, autopays on closed cards, and the
 // alerts/reminders that follow from all of that.
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
@@ -55,13 +55,13 @@ export async function loadAll() {
 export function buildBills(d: Awaited<ReturnType<typeof loadAll>>, today = todayIst()): Bill[] {
   const bills: Bill[] = [];
   const cardBy = new Map<string, any>(d.cards.map((c: any) => [c.last4, c]));
+  const before = (iso: string, days: number) => new Date(+new Date(iso + "T00:00:00Z") - days * DAY).toISOString().slice(0, 10);
 
-  // Latest statement per card/EMI that has a due date.
-  const latest = new Map<string, any>();
-  for (const s of d.statements) {
-    if (!s.due_date || s.total_due == null) continue;
-    if (!latest.has(s.card_last4)) latest.set(s.card_last4, s);
-  }
+  // Statements per card, newest first. The newest one decides what is owed:
+  // a "nothing due" statement (no due date) means older bills are settled.
+  const byCard = new Map<string, any[]>();
+  for (const s of d.statements) (byCard.get(s.card_last4) || byCard.set(s.card_last4, []).get(s.card_last4)!).push(s);
+  for (const list of byCard.values()) list.sort((a, b) => (b.statement_date || b.due_date || "").localeCompare(a.statement_date || a.due_date || ""));
 
   // Payments: attributed ones go to their card; unattributed ones (a UPI debit
   // to CRED / a card-bill payee) fill the open bill due soonest.
@@ -69,14 +69,19 @@ export function buildBills(d: Awaited<ReturnType<typeof loadAll>>, today = today
   const loose: any[] = [];
   for (const p of d.payments) (p.card_last4 ? (attributed.get(p.card_last4) || attributed.set(p.card_last4, []).get(p.card_last4)!) : loose).push(p);
 
-  for (const [last4, s] of latest) {
+  for (const [last4, list] of byCard) {
+    const s = list[0];
+    if (!s?.due_date || s.total_due == null || Number(s.total_due) <= 0) continue;
     const card = cardBy.get(last4) || { name: `HDFC card ••${last4}`, kind: "card", monthly_rate: 3.75 };
-    const cycleStart = s.statement_date || new Date(+new Date(s.due_date) - 20 * DAY).toISOString().slice(0, 10);
+    if (card.status === "closed" && card.kind !== "card") continue;
+    // Before tracking started for this account: history, not a live bill.
+    if (card.track_from && s.due_date < card.track_from) continue;
+    // Only the current cycle matters; older bills are history.
+    if (daysBetween(s.due_date, today) > 35) continue;
+    const cycleStart = s.statement_date || before(s.due_date, 20);
     const paid = (attributed.get(last4) || [])
       .filter((p) => p.paid_at.slice(0, 10) > cycleStart)
       .reduce((sum, p) => sum + Number(p.amount), 0);
-    // Only the current cycle matters; older bills are history.
-    if (daysBetween(s.due_date, today) > 35) continue;
     bills.push(makeBill(card, last4, s, paid, today, d));
   }
 
@@ -94,23 +99,99 @@ export function buildBills(d: Awaited<ReturnType<typeof loadAll>>, today = today
     }
   }
 
-  // EMI / loan rows without a fresh statement: next due from emi_due_day.
+  // Scheduled EMIs (loans, Snapmint, …): one due per month on emi_due_day,
+  // from the later of the first EMI and the day tracking started. Payments
+  // (ticked on the page) settle the earliest unpaid month first, so a missed
+  // month stays overdue until it is ticked.
   for (const c of d.cards) {
     if (c.status !== "active" || c.kind === "card" || !c.emi_amount || !c.emi_due_day) continue;
-    const s = latest.get(c.last4);
-    if (s && daysBetween(today, s.due_date) >= -2) continue;
-    const t = new Date(today + "T00:00:00Z");
-    let due = new Date(Date.UTC(t.getUTCFullYear(), t.getUTCMonth(), c.emi_due_day));
-    if (+due < +t - 2 * DAY) due = new Date(Date.UTC(t.getUTCFullYear(), t.getUTCMonth() + 1, c.emi_due_day));
-    const dueDate = due.toISOString().slice(0, 10);
-    bills.push({
-      key: `emi:${c.last4}:${dueDate}`, statementId: null, last4: c.last4, name: c.name, kind: c.kind,
-      statementDate: null, dueDate, totalDue: Number(c.emi_amount), minDue: Number(c.emi_amount), paid: 0,
-      left: Number(c.emi_amount), daysLeft: daysBetween(today, dueDate), status: "open", autoDebit: true, estIfMinimum: null,
-    });
+    const from = [c.first_emi_date, c.track_from].filter(Boolean).sort().pop() || before(today, 31);
+    const stmts = byCard.get(c.last4) || [];
+    const dues: string[] = [];
+    const f = new Date(from + "T00:00:00Z");
+    for (let i = 0; i < 4; i++) {
+      const dt = new Date(Date.UTC(f.getUTCFullYear(), f.getUTCMonth() + i, Math.min(c.emi_due_day, 28) === c.emi_due_day ? c.emi_due_day : 28));
+      const iso = dt.toISOString().slice(0, 10);
+      if (iso < from || (c.last_emi_date && iso > c.last_emi_date)) continue;
+      if (daysBetween(today, iso) > 40) break;
+      // A statement already covers this month (e.g. Debit Card EMI).
+      if (stmts.some((s) => s.due_date && Math.abs(daysBetween(s.due_date, iso)) <= 10)) continue;
+      dues.push(iso);
+    }
+    const amount = Number(c.emi_amount);
+    const rows = dues.map((due) => ({ due, paid: 0 }));
+    for (const p of (attributed.get(c.last4) || []).slice().sort((a, b) => a.paid_at.localeCompare(b.paid_at))) {
+      let amt = Number(p.amount);
+      for (const r of rows) {
+        if (amt <= 0) break;
+        if (r.paid >= amount - 1 || p.paid_at.slice(0, 10) <= before(r.due, 28)) continue;
+        const take = Math.min(amt, amount - r.paid);
+        r.paid += take; amt -= take;
+      }
+    }
+    // Every unpaid month up to today, plus the next one coming up.
+    let shownUpcoming = false;
+    for (const r of rows) {
+      const upcoming = r.due >= before(today, 2);
+      if (!upcoming && r.paid >= amount - 1) continue;
+      if (upcoming && shownUpcoming) break;
+      if (upcoming) shownUpcoming = true;
+      const b: Bill = {
+        key: `emi:${c.last4}:${r.due}`, statementId: null, last4: c.last4, name: c.name, kind: c.kind,
+        statementDate: null, dueDate: r.due, totalDue: amount, minDue: amount, paid: r.paid,
+        left: Math.max(0, amount - r.paid), daysLeft: 0, status: "open", autoDebit: true, estIfMinimum: null,
+      };
+      Object.assign(b, statusOf(b, today));
+      bills.push(b);
+    }
   }
 
   return bills.sort((a, b) => (a.left > 0 ? 0 : 1) - (b.left > 0 ? 0 : 1) || a.dueDate.localeCompare(b.dueDate));
+}
+
+export type Loan = {
+  key: string; name: string; kind: string; status: string; note: string | null;
+  emi: number | null; dueDay: number | null; interestOnly: boolean;
+  principal: number | null; annualRate: number | null; tenure: number | null;
+  firstEmi: string | null; lastEmi: string | null;
+  emisDone: number | null; emisTotal: number | null; outstanding: number | null; outstandingIsEstimate: boolean;
+  next: Bill | null;
+};
+
+// Loans and EMI plans with their progress. Balances are worked out from the
+// loan terms (lenders don't email them), so they are estimates unless a
+// statement says otherwise.
+export function buildLoans(d: Awaited<ReturnType<typeof loadAll>>, bills: Bill[], today = todayIst()): Loan[] {
+  const out: Loan[] = [];
+  for (const c of d.cards) {
+    if (c.kind === "card" || c.status === "closed") continue;
+    const emi = c.emi_amount != null ? Number(c.emi_amount) : null;
+    const tenure = c.tenure_months ?? (c.first_emi_date && c.last_emi_date ? monthsBetween(c.first_emi_date, c.last_emi_date) + 1 : null);
+    let emisDone: number | null = null;
+    if (c.first_emi_date && tenure) {
+      emisDone = c.first_emi_date > today ? 0 : Math.min(tenure, monthsBetween(c.first_emi_date, today) + (Number(today.slice(8)) >= Number(c.first_emi_date.slice(8)) ? 1 : 0));
+    }
+    let outstanding: number | null = null;
+    if (emi && tenure != null && emisDone != null) {
+      const r = c.annual_rate ? Number(c.annual_rate) / 1200 : 0;
+      const left = tenure - emisDone;
+      outstanding = r > 0 ? Math.round((emi * (1 - Math.pow(1 + r, -left))) / r) : Math.round(emi * left * 100) / 100;
+    }
+    const mine = bills.filter((b) => b.last4 === c.last4).sort((a, b) => a.dueDate.localeCompare(b.dueDate));
+    out.push({
+      key: c.last4, name: c.name, kind: c.kind, status: c.status, note: c.note || null,
+      emi, dueDay: c.emi_due_day ?? null, interestOnly: !!c.interest_only,
+      principal: c.principal != null ? Number(c.principal) : null, annualRate: c.annual_rate != null ? Number(c.annual_rate) : null,
+      tenure, firstEmi: c.first_emi_date || null, lastEmi: c.last_emi_date || null,
+      emisDone, emisTotal: tenure, outstanding, outstandingIsEstimate: !!(c.annual_rate && outstanding != null),
+      next: mine.find((b) => b.left > 1) || mine[mine.length - 1] || null,
+    });
+  }
+  return out;
+}
+
+function monthsBetween(a: string, b: string) {
+  return (Number(b.slice(0, 4)) - Number(a.slice(0, 4))) * 12 + (Number(b.slice(5, 7)) - Number(a.slice(5, 7)));
 }
 
 function statusOf(b: Bill, today: string): Pick<Bill, "status" | "daysLeft"> {
@@ -219,7 +300,7 @@ export function collectAlerts(d: Awaited<ReturnType<typeof loadAll>>, opts: { re
     const cash = bal && dl <= 7 ? ` Last a/c balance seen: ${inr(bal.amount)} (${fmtDate(bal.at.slice(0, 10))})${bal.amount < b.left ? " — LOWER than this bill." : "."}` : "";
     const verb = b.autoDebit ? "Auto-debit of" : "Pay";
     if (dl < 0 && dl >= -30) {
-      out.push({ key: `overdue:${b.key}:${today}`, level: "urgent", title: `OVERDUE ${-dl}d: ${who} — ${inr(b.left)}`, body: `Due date was ${fmtDate(b.dueDate)}. Pay now to stop late fees and further interest. Already paid? Tap "Mark paid" on the Credit Cards page so reminders stop.${interest}` });
+      out.push({ key: `overdue:${b.key}:${today}`, level: "urgent", title: `OVERDUE ${-dl}d: ${who} — ${inr(b.left)}`, body: `Due date was ${fmtDate(b.dueDate)}. Pay now to stop late fees and further interest. Already paid? Tap "Mark paid" on the Credit page so reminders stop.${interest}` });
     } else if ([7, 3, 1, 0].includes(dl)) {
       const when = dl === 0 ? "TODAY" : `in ${dl} day${dl > 1 ? "s" : ""}`;
       out.push({
