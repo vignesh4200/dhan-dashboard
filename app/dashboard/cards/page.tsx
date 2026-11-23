@@ -141,6 +141,8 @@ export default function CardsPage() {
         </div>
       </div>
 
+      <DueCalendar bills={d.bills} loans={liveLoans} today={d.today} />
+
       <div className="section-label" style={{ margin: "4px 0 -10px" }}>Everything due · cards &amp; loans</div>
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(min(280px, 100%), 1fr))", gap: 18 }}>
         {d.bills.length === 0 && <div className="raised" style={{ fontSize: 13, color: "var(--text-muted)" }}>No bills yet.</div>}
@@ -315,6 +317,96 @@ export default function CardsPage() {
       </div>
 
       <Setup d={d} post={post} busy={busy} />
+    </div>
+  );
+}
+
+// Month calendar of every due: card bills and loan EMIs from the API, plus
+// future EMIs projected from each loan's schedule so later months fill in too.
+function DueCalendar({ bills, loans, today }: { bills: any[]; loans: any[]; today: string }) {
+  const [offset, setOffset] = useState(0);
+  const base = new Date(today + "T00:00:00Z");
+  const first = new Date(Date.UTC(base.getUTCFullYear(), base.getUTCMonth() + offset, 1));
+  const y = first.getUTCFullYear(), m = first.getUTCMonth();
+  const days = new Date(Date.UTC(y, m + 1, 0)).getUTCDate();
+  const lead = (first.getUTCDay() + 6) % 7; // Monday first
+  const iso = (d: number) => `${y}-${String(m + 1).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
+  const monthStart = iso(1), monthEnd = iso(days);
+
+  type Item = { key: string; date: string; label: string; amount: number | null; kind: string; status: string };
+  const items: Item[] = [];
+  for (const b of bills) {
+    if (b.dueDate < monthStart || b.dueDate > monthEnd) continue;
+    items.push({ key: b.key, date: b.dueDate, label: b.name, amount: b.left > 1 ? b.left : b.totalDue, kind: b.kind === "card" ? "card" : "emi", status: b.status });
+  }
+  for (const l of loans) {
+    if (!l.dueDay) continue;
+    const date = iso(Math.min(l.dueDay, 28) === l.dueDay ? l.dueDay : Math.min(l.dueDay, days));
+    if ((l.firstEmi && date < l.firstEmi) || (l.lastEmi && date > l.lastEmi) || date < today) continue;
+    if (items.some((i) => i.label === l.name && Math.abs(+new Date(i.date) - +new Date(date)) < 11 * 86_400_000)) continue;
+    if (!l.emi && !l.interestOnly) continue;
+    items.push({ key: `plan:${l.key}:${date}`, date, label: l.name, amount: l.emi, kind: l.interestOnly ? "interest" : "emi", status: "planned" });
+  }
+  const byDay = new Map<string, Item[]>();
+  for (const i of items) (byDay.get(i.date) || byDay.set(i.date, []).get(i.date)!).push(i);
+  const total = items.filter((i) => i.status !== "paid").reduce((s, i) => s + (i.amount || 0), 0);
+  const color: Record<string, string> = { card: "var(--gold)", emi: "var(--c-mf)", interest: "var(--c-stocks)" };
+  const cells: (number | null)[] = [...Array(lead).fill(null), ...Array.from({ length: days }, (_, i) => i + 1)];
+  while (cells.length % 7) cells.push(null);
+  const monthName = first.toLocaleDateString("en-IN", { month: "long", year: "numeric", timeZone: "UTC" });
+  const navBtn: React.CSSProperties = { width: 40, height: 40, borderRadius: 999, border: "1px solid var(--border-strong)", background: "var(--surface-raised)", color: "var(--text)", display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer" };
+
+  return (
+    <div className="list-card" style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+      <div className="list-head" style={{ marginBottom: 0, flexWrap: "wrap", gap: 10 }}>
+        <div className="list-title">Due calendar</div>
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <button style={navBtn} aria-label="Previous month" onClick={() => setOffset(offset - 1)}><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true"><path d="M15 18l-6-6 6-6" /></svg></button>
+          <span style={{ minWidth: 130, textAlign: "center", fontWeight: 600, fontSize: 14 }}>{monthName}</span>
+          <button style={navBtn} aria-label="Next month" onClick={() => setOffset(offset + 1)}><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true"><path d="M9 18l6-6-6-6" /></svg></button>
+          {offset !== 0 && <button className="btn btn-ghost btn-sm" onClick={() => setOffset(0)}>Today</button>}
+        </div>
+      </div>
+      <div style={{ display: "flex", flexWrap: "wrap", gap: 18, alignItems: "flex-start" }}>
+        <div style={{ flex: "999 1 520px", minWidth: 0, overflowX: "auto" }}>
+          <div style={{ minWidth: 490, display: "grid", gridTemplateColumns: "repeat(7, minmax(0, 1fr))", gap: 5 }}>
+            {["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"].map((w) => <div key={w} style={{ fontSize: 11.5, color: "var(--text-muted)", textAlign: "center", paddingBottom: 2 }}>{w}</div>)}
+            {cells.map((n, i) => {
+              if (n == null) return <div key={`b${i}`} />;
+              const date = iso(n);
+              const its = byDay.get(date) || [];
+              const isToday = date === today;
+              return (
+                <div key={date} style={{ minHeight: 78, borderRadius: 10, padding: 6, display: "flex", flexDirection: "column", gap: 4, background: its.length ? "var(--surface-raised)" : "var(--surface-inset)", border: `1px solid ${isToday ? "var(--gold)" : "var(--border)"}` }}>
+                  <span style={{ fontSize: 12, color: isToday ? "var(--gold)" : "var(--text-muted)", fontWeight: isToday ? 700 : 400 }}>{n}</span>
+                  {its.map((it) => (
+                    <span key={it.key} title={`${it.label}${it.amount ? " · " + inr(it.amount) : ""}`} style={{ fontSize: 10.5, lineHeight: 1.25, padding: "2px 5px", borderRadius: 5, fontWeight: 600, color: "#0b1220", background: it.status === "overdue" || it.status === "short" ? "var(--loss)" : it.status === "paid" ? "var(--gain)" : color[it.kind], opacity: it.status === "planned" ? 0.75 : 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                      {it.label.split(" · ")[0].replace(/^HDFC /, "")}{it.amount ? ` ${inr(it.amount)}` : ""}
+                    </span>
+                  ))}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+        <div style={{ flex: "1 1 240px", display: "flex", flexDirection: "column", gap: 10 }}>
+          <div className="vault-label">{monthName} · still to pay</div>
+          <div style={{ fontSize: 26, fontWeight: 700 }}>{inr(total)}</div>
+          {items.sort((a, b) => a.date.localeCompare(b.date)).map((it) => (
+            <div key={it.key} style={{ display: "flex", justifyContent: "space-between", gap: 10, fontSize: 12.5, color: it.status === "paid" ? "var(--text-muted)" : "var(--text)" }}>
+              <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{fmtDate(it.date)} · {it.label}</span>
+              <span style={{ whiteSpace: "nowrap", color: it.status === "overdue" ? "var(--loss)" : it.status === "paid" ? "var(--gain)" : undefined }}>{it.status === "paid" ? "Paid" : it.amount ? inr(it.amount) : "amount by email"}</span>
+            </div>
+          ))}
+          {!items.length && <div style={{ fontSize: 12.5, color: "var(--text-muted)" }}>Nothing due this month.</div>}
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 12, fontSize: 11.5, color: "var(--text-muted)", paddingTop: 4 }}>
+            {[["Card", "var(--gold)"], ["EMI", "var(--c-mf)"], ["Interest", "var(--c-stocks)"], ["Paid", "var(--gain)"], ["Overdue", "var(--loss)"]].map(([k, c]) => (
+              <span key={k} style={{ display: "flex", alignItems: "center", gap: 5 }}><b style={{ width: 9, height: 9, borderRadius: 2, background: c, display: "block" }} />{k}</span>
+            ))}
+          </div>
+          <div style={{ fontSize: 11.5, color: "var(--text-muted)", lineHeight: 1.5 }}>Paler chips are projected from the loan schedule; they firm up when the statement or due date arrives. Tick EMIs as paid in Loans &amp; EMIs below.</div>
+        </div>
+      </div>
     </div>
   );
 }
